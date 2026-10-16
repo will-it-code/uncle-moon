@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>The Silver-Tailed Swimmer — living prototype</title>
+<!--
+  THE SILVER-TAILED SWIMMER · living prototype (p5.js, canvas 2D)
+  --------------------------------------------------------------
+  A code-drawn, animated mystery friend from Moon Lake: a small sleek
+  friendly creature with a long shimmering silver tail, swimming slowly
+  through dark moonlit water with soft light ripples and rising bubbles.
+  Friendly and a little magical, never scary. Gentle curious eyes.
+
+  HOW TO USE
+  - Open this file in a browser: it animates live.
+  - Add ?t=SECONDS (e.g. ?t=1.1) to render one deterministic still frame.
+    The animation is fully time-driven + seeded, so frame t is always
+    identical. This is how we extract PNG sequences for ffmpeg:
+      for each frame: screenshot ?t=<n/fps>  ->  frames/f%04d.png
+  - Add ?clean=1 to hide the corner hint below.
+-->
+<script src="vendor/p5.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #060a18; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,60,110,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">silver tail · living prototype &nbsp;—&nbsp; add <b>?t=1.1</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261019;
+
+const SKIN_TOP = [178, 220, 232];   // sleek silvery-teal back
+const SKIN_BOT = [120, 170, 198];   // softer belly
+const SILVER   = [225, 235, 248];   // shimmering tail
+
+const WATER_STOPS = [                          // dark moonlit water
+  [0.00, [ 16,  30,  66]],
+  [0.45, [ 10,  22,  52]],
+  [1.00, [  5,  10,  28]],
+];
+
+/* ================= SEEDED RNG ================= */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= TIME ================= */
+const PARAMS = new URLSearchParams(location.search);
+const T_FIXED = PARAMS.has("t") ? parseFloat(PARAMS.get("t")) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+const nowT = () => (T_FIXED !== null ? T_FIXED : millis() / 1000);
+
+/* ================= WORLD ================= */
+let bubbles = [], motes = [], glints = [];
+let waterGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 26; i++) {
+    bubbles.push({ x: rr(0, W), y0: rr(0, H), sp: rr(24, 60), r: rr(3, 10),
+                   ph: rr(0, Math.PI * 2), wob: rr(6, 18) });
+  }
+  for (let i = 0; i < 40; i++) {
+    motes.push({ x: rr(0, W), y: rr(0, H), r: rr(1, 3),
+                 a: rr(0.10, 0.30), ph: rr(0, Math.PI * 2), sp: rr(0.3, 1.0) });
+  }
+  for (let i = 0; i < 14; i++) {   // sparkles that will live on the tail
+    glints.push({ u: rr(0.1, 1.0), off: rr(-1, 1), ph: rr(0, Math.PI * 2),
+                  sp: rr(1.5, 3.5) });
+  }
+}
+
+/* ================= HELPERS ================= */
+function linGrad(x0, y0, x1, y1, stops) {
+  const g = drawingContext.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, `rgb(${c[0]},${c[1]},${c[2]})`);
+  return g;
+}
+function radialGlow(x, y, r, rgb, alpha) {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
+  g.addColorStop(0.55, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha * 0.45})`);
+  g.addColorStop(1.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+// swimmer's gentle path — deterministic in t
+function swimPos(t) {
+  return {
+    x: 640 + 300 * Math.sin((Math.PI * 2 * t) / 9.0),
+    y: 400 + 90 * Math.sin((Math.PI * 2 * t) / 6.7 + 2.0),
+  };
+}
+
+/* ================= P5 LIFECYCLE ================= */
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  buildWorld();
+  waterGrad = linGrad(0, 0, 0, H, WATER_STOPS);
+}
+
+function draw() {
+  const t = nowT();
+  const ctx = drawingContext;
+  ctx.fillStyle = waterGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  drawMoonShaft(t);
+  drawRipples(t);
+  drawMotes(t);
+  drawSwimmer(t);
+  drawBubbles(t);
+  drawVignette();
+
+  window.__frameReady = true;
+  if (T_FIXED !== null) noLoop();
+}
+
+function drawMoonShaft(t) {
+  // soft column of moonlight from above, swaying almost imperceptibly
+  const sway = 24 * Math.sin((Math.PI * 2 * t) / 11.0);
+  const ctx = drawingContext;
+  const g = ctx.createLinearGradient(640 + sway - 150, 0, 640 + sway + 150, 0);
+  g.addColorStop(0, "rgba(170,200,255,0)");
+  g.addColorStop(0.5, "rgba(170,200,255,0.10)");
+  g.addColorStop(1, "rgba(170,200,255,0)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+  radialGlow(640 + sway, -40, 320, [190, 215, 255], 0.20);  // the moon above
+}
+
+function drawRipples(t) {
+  // soft horizontal light ripples drifting slowly
+  noFill();
+  for (let i = 0; i < 6; i++) {
+    const y = 90 + i * 105;
+    const drift = 40 * Math.sin((Math.PI * 2 * t) / (7 + i * 1.7) + i * 1.3);
+    stroke(150, 190, 240, 34);
+    strokeWeight(3);
+    beginShape();
+    for (let x = -20; x <= W + 20; x += 32) {
+      const yy = y + 9 * Math.sin((x + drift * 3 + i * 60) * 0.02 + t * 0.7);
+      vertex(x, yy);
+    }
+    endShape();
+  }
+  noStroke();
+}
+
+function drawMotes(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const m of motes) {
+    const tw = 0.5 + 0.5 * Math.sin(Math.PI * 2 * t * m.sp + m.ph);
+    ctx.fillStyle = `rgba(200,225,255,${(m.a * tw).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawBubbles(t) {
+  noStroke();
+  for (const b of bubbles) {
+    let y = (b.y0 - t * b.sp) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = b.x + b.wob * Math.sin((Math.PI * 2 * t) / 2.2 + b.ph);
+    noFill();
+    stroke(200, 225, 255, 110); strokeWeight(1.6);
+    circle(x, y, b.r * 2);
+    noStroke();
+    fill(230, 242, 255, 160);
+    circle(x - b.r * 0.3, y - b.r * 0.3, b.r * 0.5);   // tiny highlight
+  }
+}
+
+function drawSwimmer(t) {
+  const p = swimPos(t);
+  const p2 = swimPos(t + 0.05);
+  const dir = p2.x >= p.x ? 1 : -1;              // face travel direction
+  const bobTilt = 0.10 * Math.sin((Math.PI * 2 * t) / 6.7 + 2.0);
+
+  push();
+  translate(p.x, p.y);
+  scale(dir, 1);
+  rotate(bobTilt);
+
+  const ctx = drawingContext;
+
+  // ---- long shimmering tail: a tapering ribbon waving behind ----
+  const SEG = 26, LEN = 190;
+  const top = [], bot = [];
+  for (let i = 0; i <= SEG; i++) {
+    const u = i / SEG;                                   // 0 at body, 1 at tip
+    const bx = -46 - u * LEN;
+    const wave = Math.sin(Math.PI * 2 * (t * 1.35 - u * 1.15)) * (6 + 34 * u);
+    const wHalf = 15 * (1 - u) + 2.5;                    // taper to a point
+    // perpendicular-ish offset (mostly vertical wave)
+    top.push([bx, wave - wHalf]);
+    bot.push([bx, wave + wHalf]);
+  }
+  const tg = ctx.createLinearGradient(-46, 0, -46 - LEN, 0);
+  tg.addColorStop(0, `rgba(${SILVER[0]},${SILVER[1]},${SILVER[2]},0.95)`);
+  tg.addColorStop(0.6, "rgba(200,215,240,0.75)");
+  tg.addColorStop(1, "rgba(180,200,230,0.35)");
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.moveTo(top[0][0], top[0][1]);
+  for (const q of top) ctx.lineTo(q[0], q[1]);
+  for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i][0], bot[i][1]);
+  ctx.closePath(); ctx.fill();
+  // shimmer sparkles travelling along the tail
+  noStroke();
+  for (const gl of glints) {
+    const i = Math.floor(gl.u * SEG);
+    const tw = 0.5 + 0.5 * Math.sin(Math.PI * 2 * t * gl.sp + gl.ph);
+    fill(255, 255, 255, 200 * tw);
+    circle(top[i][0], (top[i][1] + bot[i][1]) / 2 + gl.off * 6, 3 + 3 * tw);
+  }
+
+  // ---- sleek little body ----
+  const bgrad = ctx.createLinearGradient(0, -26, 0, 26);
+  bgrad.addColorStop(0, `rgb(${SKIN_TOP[0]},${SKIN_TOP[1]},${SKIN_TOP[2]})`);
+  bgrad.addColorStop(1, `rgb(${SKIN_BOT[0]},${SKIN_BOT[1]},${SKIN_BOT[2]})`);
+  ctx.fillStyle = bgrad;
+  ctx.beginPath(); ctx.ellipse(0, 0, 104, 52, 0, 0, Math.PI * 2); ctx.fill();
+  // pale belly
+  ctx.fillStyle = "rgba(235,245,250,0.55)";
+  ctx.beginPath(); ctx.ellipse(6, 12, 72, 26, 0, 0, Math.PI * 2); ctx.fill();
+
+  // little side fin, waving gently
+  const finWave = 0.35 * Math.sin((Math.PI * 2 * t) / 1.8);
+  push();
+  translate(-6, 10);
+  rotate(0.5 + finWave);
+  ctx.fillStyle = "rgba(150,190,220,0.85)";
+  ctx.beginPath(); ctx.ellipse(0, 16, 20, 34, 0, 0, Math.PI * 2); ctx.fill();
+  pop();
+
+  // ---- gentle curious face ----
+  const lookX = 4 * Math.sin((Math.PI * 2 * t) / 4.2);
+  const lookY = -2 + 2 * Math.cos((Math.PI * 2 * t) / 3.3);
+  noStroke();
+  fill(36, 48, 66);                                     // curious dark eyes
+  circle(22 + lookX, -8 + lookY, 15);
+  circle(44 + lookX, -6 + lookY, 15);
+  fill(255, 255, 255);                                  // catchlights
+  circle(19 + lookX, -11 + lookY, 5);
+  circle(41 + lookX, -9 + lookY, 5);
+  noFill();                                             // sweet small smile
+  stroke(60, 75, 95); strokeWeight(3.5); strokeCap(ROUND);
+  arc(34, 8, 22, 16, Math.PI * 0.2, Math.PI * 0.8);
+  noStroke();
+  radialGlow(14, 6, 8, [255, 170, 180], 0.40);           // faint blush
+  radialGlow(56, 6, 8, [255, 170, 180], 0.40);
+
+  pop();
+}
+
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(3,6,18,0)");
+  g.addColorStop(1, "rgba(3,6,18,0.50)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

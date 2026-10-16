@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mama Earth — living prototype</title>
+<!--
+  MAMA EARTH · living prototype (p5.js, canvas 2D)
+  ------------------------------------------------
+  A code-drawn, animated Mama Earth: soft blue-green sphere, slowly drifting
+  cloud swirls, sleepy face (gently closed eyes, tiny smile, rosy cheeks),
+  very slow rotation. She naps a lot in the stories. Calm, maternal, warm.
+
+  HOW TO USE
+  - Open this file in a browser: she animates live.
+  - Add ?t=SECONDS (e.g. ?t=1.1) to render one deterministic still frame.
+    The animation is fully time-driven + seeded, so frame t is always
+    identical. This is how we extract PNG sequences for ffmpeg:
+      for each frame: screenshot ?t=<n/fps>  ->  frames/f%04d.png
+  - Add ?clean=1 to hide the corner hint below.
+-->
+<script src="vendor/p5.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">mama earth · living prototype &nbsp;—&nbsp; add <b>?t=1.1</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261017;
+
+const EARTH = { x: 640, y: 360, r: 175 };
+const INK   = [90, 80, 70];
+const CHEEK = [255, 150, 150];
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const ROT_PERIOD = 40.0;   // one slow turn every 40s — she is sleepy
+const BOB_PERIOD = 7.0;
+const BOB_AMT    = 7;
+
+/* ================= SEEDED RNG ================= */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= TIME ================= */
+const PARAMS = new URLSearchParams(location.search);
+const T_FIXED = PARAMS.has("t") ? parseFloat(PARAMS.get("t")) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+const nowT = () => (T_FIXED !== null ? T_FIXED : millis() / 1000);
+
+/* ================= WORLD ================= */
+let stars = [], clouds = [], lands = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 170; i++) {
+    stars.push({ x: rr(0, W), y: rr(0, H), r: rr(0.6, 2.4),
+      baseA: rr(0.25, 0.9), speed: rr(0.4, 2.0), phase: rr(0, Math.PI * 2) });
+  }
+  // landmasses: soft green blobs at (longitude, latitude)
+  const landDefs = [
+    { lon: 0.4, lat: -0.25, s: 1.0 }, { lon: 2.2, lat: 0.15, s: 0.8 },
+    { lon: 3.8, lat: -0.35, s: 0.9 }, { lon: 5.1, lat: 0.30, s: 0.65 },
+  ];
+  for (const d of landDefs) {
+    const blobs = [];
+    const n = 5;
+    for (let i = 0; i < n; i++)
+      blobs.push({ ox: rr(-34, 34) * d.s, oy: rr(-24, 24) * d.s, r: rr(16, 34) * d.s });
+    lands.push({ ...d, blobs });
+  }
+  // cloud swirls: white puffs that drift with the rotation, plus own drift
+  for (let i = 0; i < 9; i++) {
+    const puffs = [];
+    const n = 4 + Math.floor(rr(0, 3));
+    for (let j = 0; j < n; j++)
+      puffs.push({ ox: rr(-46, 46), oy: rr(-16, 16), r: rr(13, 26) });
+    clouds.push({ lon: rr(0, Math.PI * 2), lat: rr(-0.55, 0.55),
+                  drift: rr(-0.05, 0.05), puffs, a: rr(0.5, 0.8) });
+  }
+}
+
+/* ================= HELPERS ================= */
+function linGrad(x0, y0, x1, y1, stops) {
+  const g = drawingContext.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, `rgb(${c[0]},${c[1]},${c[2]})`);
+  return g;
+}
+function radialGlow(x, y, r, rgb, alpha) {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
+  g.addColorStop(0.55, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha * 0.45})`);
+  g.addColorStop(1.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+// orthographic-ish projection of a surface point; returns null if behind
+function surf(lon, lat, R) {
+  const c = Math.cos(lon);
+  if (c < -0.15) return null;
+  return { x: R * 0.92 * Math.sin(lon), y: lat * R * 0.95, depth: (c + 0.15) / 1.15 };
+}
+
+/* ================= P5 LIFECYCLE ================= */
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  buildWorld();
+  skyGrad = linGrad(0, 0, 0, H, SKY_STOPS);
+}
+
+function draw() {
+  const t = nowT();
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+  drawStars(t);
+
+  const bob = BOB_AMT * Math.sin((Math.PI * 2 * t) / BOB_PERIOD + 0.7);
+  const rot = (Math.PI * 2 * t) / ROT_PERIOD;
+
+  push();
+  translate(EARTH.x, EARTH.y + bob);
+
+  // atmosphere halo
+  radialGlow(0, 0, EARTH.r * 1.45, [120, 180, 235], 0.16);
+  radialGlow(0, 0, EARTH.r * 1.18, [150, 200, 245], 0.14);
+
+  // ocean sphere, lit softly from upper-left
+  const R = EARTH.r;
+  let g = ctx.createRadialGradient(-R * 0.45, -R * 0.5, R * 0.1, 0, 0, R * 1.25);
+  g.addColorStop(0.00, "rgb(168,224,244)");
+  g.addColorStop(0.55, "rgb(96,170,205)");
+  g.addColorStop(1.00, "rgb(38,92,140)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+
+  // clip everything else to the sphere
+  ctx.save();
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.clip();
+
+  // landmasses drift with rotation
+  noStroke();
+  for (const L of lands) {
+    const p = surf(L.lon + rot, L.lat, R);
+    if (!p) continue;
+    const sc = 0.55 + 0.45 * p.depth;
+    fill(126, 196, 138, 235 * (0.35 + 0.65 * p.depth));
+    for (const b of L.blobs)
+      ellipse(p.x + b.ox * sc, p.y + b.oy * sc, b.r * 2 * sc, b.r * 1.6 * sc);
+  }
+  // cloud swirls: rotate slightly faster + own drift
+  for (const c of clouds) {
+    const p = surf(c.lon + rot * 1.25 + c.drift * t, c.lat, R);
+    if (!p) continue;
+    const sc = 0.55 + 0.45 * p.depth;
+    for (const pf of c.puffs) {
+      fill(255, 255, 255, 200 * c.a * (0.3 + 0.7 * p.depth));
+      ellipse(p.x + pf.ox * sc, p.y + pf.oy * sc, pf.r * 2 * sc, pf.r * 1.3 * sc);
+    }
+  }
+  // gentle night shading on the lower-right limb
+  const sh = ctx.createRadialGradient(R * 0.7, R * 0.7, R * 0.2, R * 0.7, R * 0.7, R * 1.3);
+  sh.addColorStop(0, "rgba(10,20,60,0.34)");
+  sh.addColorStop(1, "rgba(10,20,60,0)");
+  ctx.fillStyle = sh;
+  ctx.fillRect(-R, -R, R * 2, R * 2);
+  ctx.restore();
+
+  drawSleepyFace(t);
+  pop();
+
+  drawVignette();
+  window.__frameReady = true;
+  if (T_FIXED !== null) noLoop();
+}
+
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    ctx.fillStyle = `rgba(255,255,255,${(s.baseA * tw).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawSleepyFace(t) {
+  // she is napping: long calm closed eyes, tiny smile, rosy cheeks.
+  // a slow "breath" makes the cheeks rise almost imperceptibly.
+  const br = 1 + 0.012 * Math.sin((Math.PI * 2 * t) / 5.0);
+  push();
+  scale(br);
+  const fx = 0, fy = 6;
+  noFill();
+  stroke(INK[0], INK[1], INK[2]); strokeWeight(8); strokeCap(ROUND);
+  arc(fx - 52, fy - 16, 62, 30, Math.PI * 0.12, Math.PI * 0.88);  // left eye, sleepy
+  arc(fx + 52, fy - 16, 62, 30, Math.PI * 0.12, Math.PI * 0.88);  // right eye, sleepy
+  strokeWeight(8);
+  arc(fx, fy + 34, 56, 40, Math.PI * 0.18, Math.PI * 0.82);       // tiny smile
+  noStroke();
+  radialGlow(fx - 62, fy + 22, 15, CHEEK, 0.45);
+  radialGlow(fx + 62, fy + 22, 15, CHEEK, 0.45);
+  pop();
+}
+
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

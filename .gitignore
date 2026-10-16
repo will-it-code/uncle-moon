@@ -1,0 +1,10 @@
+# render outputs
+ep1_frames/
+*.mp4
+*.wav
+*.mp3
+*.png
+# python
+__pycache__/
+# os
+.DS_Store

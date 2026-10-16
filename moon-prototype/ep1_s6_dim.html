@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ep1 S6 — Pippa's light dims (Uncle Moon watches)</title>
+<!--
+  EP1 SCENE 6 · "dim" — the episode's lowest, tenderest moment.
+  ----------------------------------------------------------------------------
+  VO: s6_dim.mp3 (17.04s). "I can do it, Pippa says. I can light the whole
+  meadow myself. She rises high, and glows with all her might. But her little
+  light... wavers... and fades... until it is almost gone. Poor Pippa. She
+  sinks to the grass, in the dark."
+
+  VISUAL GRAMMAR LAW: Uncle Moon in EVERY frame, upper sky, watching.
+  P0 (studio-comparison): ANTICIPATION — she takes a breath and her glow
+  swells BEFORE the big attempt. SECONDARY ACTION — flowers droop as the
+  light fades; grass sway softens.
+  P1: per-beat COLOR GRADING — warm gold while she shines, cold blue as her
+  light fails.
+  Camera: ONE move — a slow breathing push-in (1.0 -> 1.06 over 10s).
+  Sad, never scary. Calm sleepy easings only.
+
+  Architecture: v3 pattern. ONE paused GSAP timeline owns all time. p5 draws.
+  window.__seek(t) renders one deterministic frame. ?t=SECONDS still,
+  ?clean=1 hides hint. No wall-clock, no unseeded random, noiseSeed fixed.
+-->
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<script src="cast/pippa.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">ep1 · s6 dim &nbsp;—&nbsp; add <b>?t=4.0</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261016;
+const SCENE_LEN = 17.04;      // exact VO duration (s6_dim.mp3)
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const MOON_SPOT = { x: 1060, y: 160, s: 0.5 };
+const PIPPA_LOW = { x: 640, y: 500 };
+const PIPPA_HIGH = { x: 640, y: 250 };
+const PIPPA_REST = { x: 640, y: 615 };
+
+/* ================= SEEDED RNG ================= */
+const rng = castMulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= PARAMS ================= */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* ================= TIMELINE STATE ================= */
+const state = { T: 0 };
+const moonState = { breath: -1, bobY: 9, glowPulse: 0.9, blink: 1 };
+const pippa = { x: PIPPA_LOW.x, y: PIPPA_LOW.y };
+const pippaState = { glow: 0.9, anticip: 0, waver: 0 };
+const grade = { warm: 0.9, cold: 0 };       // color grading washes
+const flora = { droop: 0, kaze: 1 };        // flowers + grass secondary
+const cam = { zoom: 1 };                    // the one camera move
+
+let tl = null;
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+  tl.to(state, { T: SCENE_LEN, duration: SCENE_LEN, ease: "none" }, 0);
+
+  // — Uncle Moon's ambient life (v3 loops) —
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(moonState, { breath: 1, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(moonState, { blink: 1, duration: 4.3 - 0.16, ease: "none" })
+    .to(moonState, { blink: 0.15, duration: 0.08, ease: "power2.in" })
+    .to(moonState, { blink: 1, duration: 0.08, ease: "power2.out" });
+  tl.add(bl, 0);
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(moonState, { bobY: 9 }, { bobY: -9, duration: 6 / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(moonState, { glowPulse: 0.8 }, { glowPulse: 1.0, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+
+  // — THE camera move: breathing push-in, then hold —
+  tl.to(cam, { zoom: 1.06, duration: 10, ease: "sine.inOut" }, 0);
+
+  // — the story —
+  const story = gsap.timeline();
+  story.addLabel("determination", 0);
+  // ANTICIPATION: she takes a breath, glow swells BEFORE the attempt
+  story.to(pippaState, { anticip: 1, duration: 1.2, ease: "sine.out" }, 0);
+  story.to(pippaState, { anticip: 0, duration: 0.8, ease: "sine.in" }, 1.2);
+
+  story.addLabel("rise", 2);
+  story.to(pippa, { x: PIPPA_HIGH.x, y: PIPPA_HIGH.y, duration: 4, ease: "sine.inOut" }, 2);
+  story.to(pippaState, { glow: 1.5, duration: 4, ease: "sine.in" }, 2);
+
+  story.addLabel("might", 6);
+  story.to(pippaState, { glow: 1.55, duration: 2, ease: "sine.out" }, 6);
+
+  story.addLabel("waver", 9);
+  story.to(pippaState, { waver: 1, duration: 1.5, ease: "sine.inOut" }, 9);
+
+  story.addLabel("fade", 11.5);
+  story.to(pippaState, { glow: 0.15, duration: 2.5, ease: "sine.inOut" }, 11.5);
+  story.to(grade, { warm: 0, duration: 3, ease: "sine.inOut" }, 11.5);
+  story.to(grade, { cold: 1, duration: 3.5, ease: "sine.inOut" }, 11.5);
+  // SECONDARY: flowers droop, grass softens as the light fails
+  story.to(flora, { droop: 1, duration: 3.5, ease: "sine.inOut" }, 12);
+  story.to(flora, { kaze: 0.45, duration: 3.5, ease: "sine.inOut" }, 12);
+
+  story.addLabel("sink", 14);
+  story.to(pippaState, { waver: 0, duration: 1, ease: "sine.out" }, 14);
+  story.to(pippa, { x: PIPPA_REST.x, y: PIPPA_REST.y, duration: 2.5, ease: "sine.inOut" }, 14);
+  tl.add(story, 0);
+}
+
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SCENE_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* ================= WORLD (seeded, built once) ================= */
+let stars = [], motes = [], nebulae = [], tufts = [], flowers = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 230; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, H * 0.80), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 34; i++) {
+    motes.push({ x: rr(0, W), y0: rr(0, H), vy: rr(6, 20), s: rr(2, 5),
+                 a: rr(0.08, 0.20), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 300,  y: 200, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1000, y: 480, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+  ];
+  // grass tufts across the meadow
+  for (let i = 0; i < 46; i++) {
+    tufts.push({ x: rr(30, W - 30), y: rr(540, 712), blades: 4 + Math.floor(rng() * 4),
+                 phase: rr(0, Math.PI * 2), h: rr(22, 44), hue: rr(0, 1) });
+  }
+  // sleepy flowers
+  const petalCols = [[214, 150, 200], [150, 170, 230], [240, 200, 150], [190, 150, 220]];
+  for (let i = 0; i < 14; i++) {
+    flowers.push({ x: rr(60, W - 60), y: rr(548, 700), stemH: rr(34, 58),
+                   col: petalCols[Math.floor(rng() * petalCols.length)],
+                   phase: rr(0, Math.PI * 2), size: rr(0.8, 1.25) });
+  }
+}
+
+/* ================= P5 LIFECYCLE ================= */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = castLinGrad(window, 0, 0, 0, H, SKY_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) { window.__seek(T_FIXED); noLoop(); }
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT % SCENE_LEN);
+}
+
+/* Virtual camera: zoom around center, nearer planes zoom more (multiplane). */
+function withCam(pf, fn) {
+  push();
+  const z = 1 + (cam.zoom - 1) * pf;
+  translate(W / 2, H / 2); scale(z, z); translate(-W / 2, -H / 2);
+  fn();
+  pop();
+}
+
+function renderFrame() {
+  const t = state.T;
+
+  // sky: screen-space backdrop (infinitely far, no camera)
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+
+  withCam(0.15, () => drawStars(t));
+  withCam(0.35, () => drawNebulae(t));
+  withCam(0.7, () => {
+    drawUncleMoon(window, MOON_SPOT.x, MOON_SPOT.y, MOON_SPOT.s, t,
+      { breath: moonState.breath, bobY: moonState.bobY,
+        glowPulse: moonState.glowPulse, blink: moonState.blink,
+        greetGlow: 1, tilt: -0.03, skyFill: skyGrad });
+    drawDust(t);
+  });
+  withCam(0.7, () => drawPippaInSky(t));
+  withCam(1.0, () => { drawMeadow(t); drawLightPool(t); });
+
+  // screen-space post: color grade, then vignette
+  drawGrade();
+  drawVignette();
+}
+
+/* ================= SKY LAYERS ================= */
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 90 * (noise(n.ph, t * 0.015) - 0.5) * 2;
+    const y = n.y + 45 * (noise(n.ph + 90, t * 0.012) - 0.5) * 2;
+    castRadialGlow(window, x, y, n.r, n.col, n.a);
+  }
+}
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const dx = 14 * (noise(s.phase, t * 0.010) - 0.5) * 2;
+    const dy = 10 * (noise(s.phase + 40, t * 0.008) - 0.5) * 2;
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const wander = 0.80 + 0.40 * noise(s.phase + 80, t * 0.05);
+    const a = s.baseA * tw * wander;
+    ctx.fillStyle = `rgba(${s.col[0]},${s.col[1]},${s.col[2]},${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x + dx, s.y + dy, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x + dx - L, s.y + dy, s.x + dx + L, s.y + dy);
+      line(s.x + dx, s.y + dy - L, s.x + dx, s.y + dy + L);
+      noStroke();
+    }
+  }
+}
+function drawDust(t) {
+  for (const m of motes) {
+    let y = (m.y0 - t * m.vy) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = m.x + 40 * (noise(m.phase, t * 0.06) - 0.5) * 2;
+    castRadialGlow(window, x, y, m.s * 2.4, [255, 240, 210], m.a);
+  }
+}
+
+/* ================= PIPPA ================= */
+function pippaGlowEff(t) {
+  // anticipation swell + waver flicker, both deterministic
+  let g = pippaState.glow * (1 + 0.25 * pippaState.anticip);
+  if (pippaState.waver > 0.01) {
+    const flick = 0.5 + 0.5 * Math.sin(t * 23) * Math.sin(t * 17.3 + 1.0);
+    g *= (1 - pippaState.waver * (0.30 + 0.35 * flick));
+  }
+  return Math.max(0.05, g);
+}
+function drawPippaInSky(t) {
+  const dip = 18 * pippaState.anticip;   // the breath before the leap
+  const hover = 8 * Math.sin((Math.PI * 2 * t) / 2.4);
+  const g = pippaGlowEff(t);
+  drawPippa(window, pippa.x, pippa.y + dip + hover * Math.min(1, g), 1.0, t,
+    { glow: g, tilt: 0.12 * Math.sin((Math.PI * 2 * t) / 3.6) });
+}
+
+/* ================= MEADOW ================= */
+function drawMeadow(t) {
+  // rolling dark mounds
+  noStroke();
+  fill(16, 22, 44);
+  ellipse(W / 2 - 160, H + 190, 1500, 380);
+  fill(10, 14, 32);
+  ellipse(W / 2 + 200, H + 250, 1750, 420);
+
+  // grass tufts (kaze: sway softens as her light fails)
+  const swayAmp = 7 * flora.kaze + 2;
+  for (const tu of tufts) {
+    const sway = swayAmp * Math.sin((Math.PI * 2 * t) / 3.4 + tu.phase);
+    const gBase = 52 + tu.hue * 22;
+    stroke(38 + tu.hue * 14, gBase + 26, 52); strokeWeight(3); strokeCap(ROUND);
+    for (let b = 0; b < tu.blades; b++) {
+      const bx = tu.x + (b - tu.blades / 2) * 7;
+      const tipX = bx + sway * (0.6 + 0.4 * Math.sin(tu.phase + b));
+      const tipY = tu.y - tu.h * (0.75 + 0.25 * Math.sin(tu.phase * 2 + b));
+      noFill();
+      bezier(bx, tu.y, bx, tu.y - tu.h * 0.5, tipX, tipY + 8, tipX, tipY);
+    }
+  }
+  noStroke();
+
+  // flowers: heads nod and droop as the light fades
+  for (const f of flowers) {
+    const sway = (4 * flora.kaze + 1) * Math.sin((Math.PI * 2 * t) / 4.1 + f.phase);
+    const dr = flora.droop;
+    const hx = f.x + sway + dr * 26;
+    const hy = f.y - f.stemH + dr * 12;
+    stroke(52, 96, 62); strokeWeight(4); strokeCap(ROUND);
+    line(f.x, f.y, hx, hy);
+    noStroke();
+    push();
+    translate(hx, hy);
+    rotate(dr * 1.15 + 0.08 * Math.sin((Math.PI * 2 * t) / 4.1 + f.phase));
+    scale(f.size, f.size);
+    fill(f.col[0], f.col[1], f.col[2]);
+    for (let k = 0; k < 5; k++) {
+      const a = (Math.PI * 2 * k) / 5;
+      ellipse(11 * Math.cos(a), 11 * Math.sin(a), 15, 11);
+    }
+    fill(250, 225, 140);
+    circle(0, 0, 13);
+    pop();
+  }
+  noStroke();
+}
+
+/* Her light washing the meadow (and shrinking as she dims). */
+function drawLightPool(t) {
+  const g = pippaGlowEff(t);
+  const gn = Math.min(1, g / 1.5);
+  if (gn < 0.02) return;
+  castRadialGlow(window, pippa.x, 600, 120 + 380 * gn, [255, 214, 130], 0.30 * gn);
+  castRadialGlow(window, pippa.x, pippa.y, 200 * gn + 40, [255, 220, 150], 0.18 * gn);
+}
+
+/* ================= POST: grade + vignette ================= */
+function drawGrade() {
+  const ctx = drawingContext;
+  if (grade.warm > 0.01) {
+    ctx.fillStyle = `rgba(255,190,110,${(0.10 * grade.warm).toFixed(3)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+  if (grade.cold > 0.01) {
+    ctx.fillStyle = `rgba(90,130,220,${(0.18 * grade.cold).toFixed(3)})`;
+    ctx.fillRect(0, 0, W, H);
+  }
+}
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

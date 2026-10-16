@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Pippa the Firefly — living prototype</title>
+<!--
+  PIPPA THE FIREFLY · living prototype (p5.js, canvas 2D)
+  ------------------------------------------------------
+  A code-drawn, animated Pippa: tiny dark round body, big cute eyes,
+  translucent fluttering wings, warm butter-yellow abdomen glow that pulses
+  gently. She bobs and drifts playfully around the night meadow, leaving a
+  faint sparkle trail. Kind, warm, the warmest glow.
+
+  HOW TO USE
+  - Open this file in a browser: she animates live.
+  - Add ?t=SECONDS (e.g. ?t=1.1) to render one deterministic still frame.
+    The animation is fully time-driven + seeded, so frame t is always
+    identical. This is how we extract PNG sequences for ffmpeg:
+      for each frame: screenshot ?t=<n/fps>  ->  frames/f%04d.png
+  - Add ?clean=1 to hide the corner hint below.
+-->
+<script src="vendor/p5.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">pippa · living prototype &nbsp;—&nbsp; add <b>?t=1.1</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261018;
+
+const GLOW = [255, 214, 130];   // her warm butter-yellow glow
+const BODY = [52, 46, 64];      // tiny dark round body
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const GLOW_PERIOD = 2.2;   // gentle pulse of her lantern
+const WING_HZ     = 6.0;   // soft wing flutter
+
+/* ================= SEEDED RNG ================= */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= TIME ================= */
+const PARAMS = new URLSearchParams(location.search);
+const T_FIXED = PARAMS.has("t") ? parseFloat(PARAMS.get("t")) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+const nowT = () => (T_FIXED !== null ? T_FIXED : millis() / 1000);
+
+/* ================= WORLD ================= */
+let stars = [], grass = [], flowers = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 190; i++) {
+    stars.push({ x: rr(0, W), y: rr(0, H * 0.8), r: rr(0.6, 2.6),
+      baseA: rr(0.25, 0.95), speed: rr(0.4, 2.2), phase: rr(0, Math.PI * 2) });
+  }
+  for (let x = 8; x < W; x += rr(18, 42)) {
+    grass.push({ x, h: rr(36, 110), lean: rr(-14, 14), ph: rr(0, Math.PI * 2),
+                 w: rr(5, 9), col: rng() < 0.5 ? [34, 84, 58] : [44, 104, 70] });
+  }
+  for (let i = 0; i < 12; i++) {
+    flowers.push({ x: rr(30, W - 30), y: rr(H - 150, H - 40),
+                   r: rr(4, 8), ph: rr(0, Math.PI * 2) });
+  }
+}
+
+/* ================= HELPERS ================= */
+function linGrad(x0, y0, x1, y1, stops) {
+  const g = drawingContext.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, `rgb(${c[0]},${c[1]},${c[2]})`);
+  return g;
+}
+function radialGlow(x, y, r, rgb, alpha) {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
+  g.addColorStop(0.55, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha * 0.45})`);
+  g.addColorStop(1.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+// her playful flight path — deterministic in t, so the trail can rewind it
+function pippaPos(t) {
+  return {
+    x: 640 + 380 * Math.sin((Math.PI * 2 * t) / 7.0 + 1.0),
+    y: 350 + 150 * Math.sin((Math.PI * 2 * t) / 5.3)
+         + 18 * Math.sin((Math.PI * 2 * t) / 1.7),
+  };
+}
+
+/* ================= P5 LIFECYCLE ================= */
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  buildWorld();
+  skyGrad = linGrad(0, 0, 0, H, SKY_STOPS);
+}
+
+function draw() {
+  const t = nowT();
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+  drawStars(t);
+  drawMeadow(t);
+  drawTrail(t);
+  drawPippa(t);
+  drawVignette();
+  window.__frameReady = true;
+  if (T_FIXED !== null) noLoop();
+}
+
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    ctx.fillStyle = `rgba(255,255,255,${(s.baseA * tw).toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+function drawMeadow(t) {
+  noStroke();
+  fill(10, 18, 30);
+  rect(0, H - 170, W, 170);                       // meadow ground
+  for (const gblade of grass) {                   // swaying blades
+    const sway = 6 * Math.sin((Math.PI * 2 * t) / 3.4 + gblade.ph);
+    fill(gblade.col[0], gblade.col[1], gblade.col[2]);
+    push();
+    translate(gblade.x, H - 40);
+    rotate((gblade.lean + sway) * Math.PI / 180 * 0.4);
+    triangle(-gblade.w / 2, 0, gblade.w / 2, 0, 0, -gblade.h);
+    pop();
+  }
+  for (const f of flowers) {                       // tiny glowing flowers
+    const tw = 0.6 + 0.4 * Math.sin((Math.PI * 2 * t) / 2.6 + f.ph);
+    radialGlow(f.x, f.y, f.r * 3.2, GLOW, 0.30 * tw);
+    fill(255, 236, 190, 220);
+    circle(f.x, f.y, f.r * 2);
+  }
+}
+
+function drawTrail(t) {
+  // faint sparkle trail: rewind her path, fading with age
+  noStroke();
+  for (let k = 10; k >= 1; k--) {
+    const p = pippaPos(t - k * 0.07);
+    const a = 0.20 * (1 - k / 11);
+    radialGlow(p.x, p.y, 26 * (1 - k / 14), GLOW, a);
+    if (k % 3 === 0) {
+      fill(255, 244, 210, 200 * (1 - k / 11));
+      circle(p.x + 8 * Math.sin(k * 2.1 + t), p.y - 6, 3.5);
+    }
+  }
+}
+
+function drawPippa(t) {
+  const p = pippaPos(t);
+  const pulse = 0.72 + 0.28 * Math.sin((Math.PI * 2 * t) / GLOW_PERIOD);
+  const tilt = 0.18 * Math.sin((Math.PI * 2 * t) / 3.6);   // she leans into turns
+
+  // her warm halo lights the meadow around her
+  radialGlow(p.x, p.y, 150 * pulse + 40, GLOW, 0.30 * pulse);
+  radialGlow(p.x, p.y, 70, GLOW, 0.45 * pulse);
+
+  push();
+  translate(p.x, p.y);
+  rotate(tilt);
+
+  // wings: translucent, fluttering softly
+  const flap = Math.sin(Math.PI * 2 * t * WING_HZ) * 0.45;
+  noStroke();
+  for (const s of [-1, 1]) {
+    push();
+    translate(s * 10, -18);
+    rotate(s * (0.5 + flap * 0.6));
+    fill(235, 242, 255, 90);
+    ellipse(s * 16, -14, 44, 20);
+    fill(255, 255, 255, 60);
+    ellipse(s * 16, -14, 30, 12);
+    pop();
+  }
+
+  // tiny dark round body
+  const ctx = drawingContext;
+  const bg = ctx.createRadialGradient(-8, -10, 4, 0, 0, 30);
+  bg.addColorStop(0, "rgb(74,66,92)");
+  bg.addColorStop(1, `rgb(${BODY[0]},${BODY[1]},${BODY[2]})`);
+  ctx.fillStyle = bg;
+  ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
+
+  // glowing abdomen (her lantern)
+  radialGlow(4, 12, 20 * pulse + 6, GLOW, 0.85);
+  fill(255, 226, 150, 235);
+  ellipse(4, 12, 22 * pulse + 8, 16 * pulse + 6);
+
+  // big cute eyes, glancing around curiously
+  const gx = 5 * Math.sin((Math.PI * 2 * t) / 3.1);
+  const gy = 3 * Math.cos((Math.PI * 2 * t) / 2.3);
+  noStroke();
+  fill(255, 255, 255);
+  circle(-11, -8, 26);
+  circle(13, -8, 26);
+  fill(40, 34, 52);
+  circle(-11 + gx, -8 + gy, 12);
+  circle(13 + gx, -8 + gy, 12);
+  fill(255, 255, 255);
+  circle(-13 + gx, -10 + gy, 4);
+  circle(11 + gx, -10 + gy, 4);
+
+  // tiny sweet smile + rosy cheeks
+  noFill();
+  stroke(70, 58, 78); strokeWeight(3); strokeCap(ROUND);
+  arc(1, 6, 16, 12, Math.PI * 0.2, Math.PI * 0.8);
+  noStroke();
+  radialGlow(-20, 4, 7, [255, 150, 150], 0.5);
+  radialGlow(22, 4, 7, [255, 150, 150], 0.5);
+
+  // little antennae with glowing tips
+  noFill();
+  stroke(70, 58, 78); strokeWeight(2.5);
+  bezier(-8, -24, -14, -34, -20, -38, -26, -40);
+  bezier(8, -24, 14, -34, 20, -38, 26, -40);
+  noStroke();
+  radialGlow(-26, -40, 7, GLOW, 0.8);
+  radialGlow(26, -40, 7, GLOW, 0.8);
+
+  pop();
+}
+
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

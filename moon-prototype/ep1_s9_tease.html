@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ep1 S9 — Moon Lake tease (Uncle Moon watches)</title>
+<!--
+  EP1 SCENE 9 · "tease" — the series open loop. Wonder, then rest.
+  ----------------------------------------------------------------------------
+  VO: s9_tease.mp3 (18.384s). "But wait... do you hear that? Far away, at
+  Moon Lake... splash. Did you see it? A silver tail, slipping under the
+  water. Who could it be? Hmm. Tomorrow night... we shall find out. Sleep
+  now, little star. I will be right here, until morning."
+
+  VISUAL GRAMMAR LAW: Uncle Moon in EVERY frame, upper sky, curious then calm.
+  P0: ANTICIPATION — the moon tilts, listening, BEFORE the splash; mist
+  thickens a breath before the tail rises. SECONDARY — mist drifts, ripple
+  rings expand, reeds sway.
+  P1: COLOR — cool moonlit silver-blue throughout; the moon stays warm.
+  The silver tail arcs out of Moon Lake and slips back under. Mystery,
+  never fear.
+  Camera: ONE move — a slow breathing push-in (1.0 -> 1.05 over 14s).
+
+  Architecture: v3 pattern. ONE paused GSAP timeline. p5 draws.
+  window.__seek(t) renders one deterministic frame. ?t=SECONDS still,
+  ?clean=1 hides hint. No wall-clock, no unseeded random, noiseSeed fixed.
+-->
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #060a18; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,60,110,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">ep1 · s9 tease &nbsp;—&nbsp; add <b>?t=7.0</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261019;
+const SCENE_LEN = 18.384;     // exact VO duration (s9_tease.mp3)
+
+const SKY_STOPS = [
+  [0.00, [  6,   8,  26]],
+  [0.50, [ 14,  20,  54]],
+  [1.00, [ 24,  34,  78]],
+];
+const WATER_STOPS = [
+  [0.00, [ 20,  34,  72]],
+  [0.45, [ 12,  24,  56]],
+  [1.00, [  6,  12,  32]],
+];
+const WATERLINE = 330;
+const MOON_SPOT = { x: 760, y: 150, s: 0.55 };
+const TAIL_SPOT = { x: 700, y: 448 };   // where the tail breaches
+
+/* ================= SEEDED RNG ================= */
+const rng = castMulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= PARAMS ================= */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* ================= TIMELINE STATE ================= */
+const state = { T: 0 };
+const moonState = { breath: -1, bobY: 9, glowPulse: 0.9, blink: 1, tilt: 0 };
+const splash = { burst: 0 };              // the splash moment
+const tail = { emerge: 0, submerge: 0 };  // the silver tail
+const lake = { ripple: 0, mistThick: 0 }; // secondary: ripples + mist
+const cam = { zoom: 1 };
+
+let tl = null;
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+  tl.to(state, { T: SCENE_LEN, duration: SCENE_LEN, ease: "none" }, 0);
+
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(moonState, { breath: 1, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(moonState, { blink: 1, duration: 4.3 - 0.16, ease: "none" })
+    .to(moonState, { blink: 0.15, duration: 0.08, ease: "power2.in" })
+    .to(moonState, { blink: 1, duration: 0.08, ease: "power2.out" });
+  tl.add(bl, 0);
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(moonState, { bobY: 9 }, { bobY: -9, duration: 6 / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(moonState, { glowPulse: 0.8 }, { glowPulse: 1.0, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+
+  tl.to(cam, { zoom: 1.05, duration: 14, ease: "sine.inOut" }, 0);
+
+  const story = gsap.timeline();
+  story.addLabel("listen", 0);
+  // ANTICIPATION: the moon tilts, listening, before anything happens
+  story.to(moonState, { tilt: 0.07, duration: 3, ease: "sine.inOut" }, 0);
+  story.to(lake, { mistThick: 1, duration: 3, ease: "sine.inOut" }, 1);
+
+  story.addLabel("splash", 3.8);
+  story.to(splash, { burst: 1, duration: 1.2, ease: "sine.out" }, 3.8);
+
+  story.addLabel("tail-rises", 5);
+  story.to(tail, { emerge: 1, duration: 2, ease: "sine.out" }, 5);
+
+  story.addLabel("tail-holds", 7);
+
+  story.addLabel("slips-under", 8);
+  story.to(tail, { submerge: 1, duration: 2, ease: "sine.in" }, 8);
+  story.to(lake, { ripple: 1, duration: 1.5, ease: "sine.out" }, 8);
+
+  story.addLabel("wonder", 10);
+  story.to(moonState, { tilt: 0.02, duration: 3, ease: "sine.inOut" }, 10);
+  story.to(lake, { ripple: 0, duration: 6, ease: "sine.inOut" }, 10);
+
+  story.addLabel("rest", 14);
+  story.to(lake, { mistThick: 0.4, duration: 4, ease: "sine.inOut" }, 14);
+  tl.add(story, 0);
+}
+
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SCENE_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* ================= WORLD (seeded, built once) ================= */
+let stars = [], mists = [], droplets = [], glints = [];
+let skyGrad = null, waterGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 150; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, WATERLINE - 40), r: rr(0.6, 2.4),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.2), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+    });
+  }
+  for (let i = 0; i < 8; i++) {
+    mists.push({ x0: rr(100, W - 100), y: rr(350, 520), r: rr(120, 220),
+                 phase: rr(0, Math.PI * 2), sp: rr(0.10, 0.22) });
+  }
+  for (let i = 0; i < 12; i++) {
+    droplets.push({ ang: rr(-1.2, 1.2), sp: rr(160, 320), r: rr(3, 6),
+                    ph: rr(0, Math.PI * 2) });
+  }
+  for (let i = 0; i < 10; i++) {
+    glints.push({ u: rr(0.15, 1.0), off: rr(-1, 1), ph: rr(0, Math.PI * 2),
+                  sp: rr(1.5, 3.5) });
+  }
+}
+
+/* ================= P5 LIFECYCLE ================= */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = castLinGrad(window, 0, 0, 0, WATERLINE, SKY_STOPS);
+  waterGrad = castLinGrad(window, 0, WATERLINE, 0, H, WATER_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) { window.__seek(T_FIXED); noLoop(); }
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT % SCENE_LEN);
+}
+
+function withCam(pf, fn) {
+  push();
+  const z = 1 + (cam.zoom - 1) * pf;
+  translate(W / 2, H / 2); scale(z, z); translate(-W / 2, -H / 2);
+  fn();
+  pop();
+}
+
+function renderFrame() {
+  const t = state.T;
+  const ctx = drawingContext;
+
+  // sky + water: screen-space backdrops
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, WATERLINE + 2);
+  ctx.fillStyle = waterGrad;
+  ctx.fillRect(0, WATERLINE, W, H - WATERLINE);
+
+  withCam(0.15, () => drawStars(t));
+  withCam(0.5, () => {
+    drawUncleMoon(window, MOON_SPOT.x, MOON_SPOT.y, MOON_SPOT.s, t,
+      { breath: moonState.breath, bobY: moonState.bobY,
+        glowPulse: moonState.glowPulse, blink: moonState.blink,
+        greetGlow: 1, tilt: moonState.tilt, skyFill: skyGrad });
+  });
+  withCam(0.6, () => drawShoreline(t));
+  withCam(0.8, () => {
+    drawTail(t);
+    drawWaterOverlay();   // hides the submerged part of the tail
+    drawReflection(t);    // re-drawn over the band (would otherwise be erased)
+    drawRipples(t);
+    drawSplash(t);
+  });
+  withCam(0.9, () => drawMist(t));
+  withCam(1.0, () => drawReeds(t));
+
+  drawVignette();
+}
+
+/* ================= SKY ================= */
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const a = s.baseA * tw;
+    ctx.fillStyle = "rgba(" + s.col[0] + "," + s.col[1] + "," + s.col[2] + "," + a.toFixed(3) + ")";
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+  }
+}
+
+/* Distant shoreline silhouette. */
+function drawShoreline(t) {
+  noStroke();
+  fill(10, 14, 30);
+  beginShape();
+  vertex(0, WATERLINE + 2);
+  for (let x = 0; x <= W; x += 40) {
+    const y = WATERLINE - 26 - 22 * noise(x * 0.008, 3.7);
+    vertex(x, y);
+  }
+  vertex(W, WATERLINE + 2);
+  endShape(CLOSE);
+  // a few sleepy pines
+  fill(8, 12, 26);
+  const pines = [[120, 1.0], [240, 0.7], [1080, 1.1], [1180, 0.8]];
+  for (const [px, ps] of pines) {
+    const py = WATERLINE - 26 - 22 * noise(px * 0.008, 3.7);
+    triangle(px - 26 * ps, py, px + 26 * ps, py, px, py - 70 * ps);
+    triangle(px - 20 * ps, py - 34 * ps, px + 20 * ps, py - 34 * ps, px, py - 96 * ps);
+  }
+}
+
+/* ================= THE MOON'S REFLECTION ================= */
+function drawReflection(t) {
+  const cx = MOON_SPOT.x;
+  const wobbleBoost = 1 + lake.ripple * 2.2 + splash.burst * 1.5;
+  noStroke();
+  for (let i = 0; i < 26; i++) {
+    const y = WATERLINE + 14 + i * 15;
+    const f = i / 26;
+    const w = (150 * (1 - f * 0.55)) * (0.75 + 0.25 * Math.sin(t * 1.3 + i));
+    const xoff = wobbleBoost * 26 * Math.sin(t * 0.9 + i * 0.75) * (0.3 + f);
+    const a = 0.34 * (1 - f * 0.6) * (0.7 + 0.3 * Math.sin(t * 2.1 + i * 1.3));
+    const ctx = drawingContext;
+    ctx.fillStyle = "rgba(255,244,214," + a.toFixed(3) + ")";
+    ctx.beginPath();
+    ctx.ellipse(cx + xoff, y, w, 5.5, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // soft glow column under the moon
+  castRadialGlow(window, cx, WATERLINE + 120, 260, [255, 240, 200], 0.10);
+}
+
+/* ================= THE SILVER TAIL ================= */
+function drawTail(t) {
+  const em = tail.emerge, sub = tail.submerge;
+  if (em < 0.01) return;
+  const bx = TAIL_SPOT.x, by = TAIL_SPOT.y;
+  // tip arcs up and curls as it emerges; the whole tail sinks as it submerges
+  const tipX = bx - 70 * em, tipY = by - 235 * em + 300 * sub;
+  const baseY = by + 300 * sub;
+  const cxp = bx - 95 * em, cyp = by - 130 * em + 300 * sub;
+  const ctx = drawingContext;
+
+  const SEG = 30;
+  const top = [], bot = [];
+  for (let i = 0; i <= SEG; i++) {
+    const u = i / SEG;
+    const ix = (1 - u) * (1 - u) * bx + 2 * (1 - u) * u * cxp + u * u * tipX;
+    const iy = (1 - u) * (1 - u) * baseY + 2 * (1 - u) * u * cyp + u * u * tipY;
+    const wave = Math.sin(Math.PI * 2 * (t * 1.35 - u * 1.15)) * (4 + 22 * u);
+    const wHalf = (15 * (1 - u) + 2.5) * Math.min(1, em * 3);
+    // perpendicular offset (curve mostly vertical, so offset x)
+    top.push([ix - wHalf + wave * 0.3, iy]);
+    bot.push([ix + wHalf + wave * 0.3, iy]);
+  }
+  const tg = ctx.createLinearGradient(bx, baseY, tipX, tipY);
+  tg.addColorStop(0, "rgba(225,235,248,0.95)");
+  tg.addColorStop(0.6, "rgba(200,215,240,0.75)");
+  tg.addColorStop(1, "rgba(180,200,230,0.35)");
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.moveTo(top[0][0], top[0][1]);
+  for (const q of top) ctx.lineTo(q[0], q[1]);
+  for (let i = bot.length - 1; i >= 0; i--) ctx.lineTo(bot[i][0], bot[i][1]);
+  ctx.closePath(); ctx.fill();
+  // shimmer sparkles travelling along the tail
+  noStroke();
+  for (const gl of glints) {
+    const i = Math.min(SEG, Math.floor(gl.u * SEG));
+    const tw = 0.5 + 0.5 * Math.sin(Math.PI * 2 * t * gl.sp + gl.ph);
+    fill(255, 255, 255, 200 * tw * em);
+    circle((top[i][0] + bot[i][0]) / 2, (top[i][1] + bot[i][1]) / 2 + gl.off * 6, 3 + 3 * tw);
+  }
+}
+
+/* Water surface band drawn OVER the tail: hides the submerged part.
+   (The reflection is re-drawn after this call in renderFrame.) */
+function drawWaterOverlay() {
+  const ctx = drawingContext;
+  ctx.fillStyle = waterGrad;
+  ctx.fillRect(0, WATERLINE + 4, W, H - WATERLINE - 4);
+}
+
+/* Ripple rings: splash burst + the long wondering ripples. */
+function drawRipples(t) {
+  const ctx = drawingContext;
+  const rings = [];
+  if (splash.burst > 0.01) {
+    const bt = (t - 3.8);
+    if (bt > 0) {
+      for (let k = 0; k < 3; k++) {
+        const rt = bt - k * 0.28;
+        if (rt > 0) rings.push({ r: rt * 110, a: 0.55 * Math.exp(-rt * 1.1) * splash.burst });
+      }
+    }
+  }
+  if (lake.ripple > 0.01) {
+    for (let k = 0; k < 4; k++) {
+      const rt = (t - 8 + k * 1.1) % 6;
+      rings.push({ r: 60 + rt * 95, a: 0.30 * Math.exp(-rt * 0.55) * lake.ripple });
+    }
+  }
+  // the final ring as the tail slips under
+  const ft = t - 9.8;
+  if (ft > 0 && ft < 6) {
+    rings.push({ r: ft * 100, a: 0.5 * Math.exp(-ft * 0.9) });
+  }
+  noFill();
+  for (const rg of rings) {
+    if (rg.a < 0.01 || rg.r < 4) continue;
+    ctx.strokeStyle = "rgba(200,225,250," + rg.a.toFixed(3) + ")";
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.ellipse(TAIL_SPOT.x, TAIL_SPOT.y + 6, rg.r, rg.r * 0.30, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  noStroke();
+}
+
+/* Splash droplets: deterministic ballistics from t=3.8. */
+function drawSplash(t) {
+  const dt = t - 3.8;
+  if (dt < 0 || dt > 1.4 || splash.burst < 0.01) return;
+  noStroke();
+  for (const d of droplets) {
+    const vx = Math.sin(d.ang) * d.sp, vy = -Math.cos(d.ang) * d.sp * 1.15;
+    const x = TAIL_SPOT.x + vx * dt;
+    const y = TAIL_SPOT.y - 4 + vy * dt + 320 * dt * dt;
+    if (y > TAIL_SPOT.y + 10) continue;
+    const a = splash.burst * Math.max(0, 1 - dt / 1.4);
+    fill(210, 230, 250, 220 * a);
+    circle(x, y, d.r * 2);
+  }
+  // foam burst at the base
+  castRadialGlow(window, TAIL_SPOT.x, TAIL_SPOT.y, 90 * splash.burst + 20,
+                 [220, 235, 250], 0.35 * splash.burst * Math.max(0, 1 - dt));
+}
+
+/* ================= MIST + REEDS (secondary) ================= */
+function drawMist(t) {
+  for (const m of mists) {
+    const x = m.x0 + 70 * Math.sin(t * m.sp + m.phase);
+    const a = (0.09 + 0.07 * lake.mistThick) * (0.7 + 0.3 * Math.sin(t * 0.4 + m.phase));
+    castRadialGlow(window, x, m.y, m.r, [200, 215, 235], a);
+  }
+}
+function drawReeds(t) {
+  const clusters = [[70, 1.0], [180, 0.75], [1120, 1.05], [1220, 0.8]];
+  for (const [rx, rs] of clusters) {
+    for (let b = -2; b <= 2; b++) {
+      const bx = rx + b * 26 * rs;
+      const sway = 10 * Math.sin((Math.PI * 2 * t) / 5.2 + bx * 0.05);
+      const topY = H - 190 * rs;
+      stroke(24, 40, 44); strokeWeight(7 * rs); strokeCap(ROUND);
+      line(bx, H + 10, bx + sway, topY);
+      noStroke();
+      fill(40, 62, 66);
+      ellipse(bx + sway, topY - 8, 16 * rs, 34 * rs);
+    }
+  }
+  noStroke();
+}
+
+/* ================= POST: vignette ================= */
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(3,6,18,0)");
+  g.addColorStop(1, "rgba(3,6,18,0.50)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ep1 S5 — Tommy the Turtle (Uncle Moon watches)</title>
+<!--
+  EP1 S5 · tommy the turtle — full VO version (20.76s)
+  ----------------------------------------------------------------------------
+  VISUAL GRAMMAR LAW: Uncle Moon in EVERY frame, watching from the sky,
+  plus his reflection shimmering in the pond below.
+
+  VO beat sheet (s5_turtle.mp3, 20.76s):
+    0.00- 3.04  "Down by the pond, Tommy the turtle is lost."   tommy-lost
+    3.04- 6.64  "The water is dark, he cannot find his way home." (searching)
+    6.64-11.51  "Pippa zips through the reeds, her light swinging
+                  like a tiny lantern."                        pippa-zips
+   11.51-12.92  "Follow me, she hums."                          follow-me
+   12.92-16.59  "And Tommy follows the little glow, all the way home."
+                                                               journey-home
+   16.59-18.99  "But Pippa's light is dimmer still."            pippa-dims
+   18.99-19.98  "It flickers..."                                flicker
+   19.98-20.76  "sputters..."                                   (soft sputter)
+
+  P0 craft: ANTICIPATION = the reeds part gently (5.6-6.6s) BEFORE Pippa
+  zips through. SECONDARY = ripples expand on the water, Tommy's slow
+  blink, reeds swaying, Pippa's light swinging like a pendulum lantern.
+  All travel in ARCS. Camera: ONE move - a barely-there lateral drift
+  that follows the journey home.
+
+  Architecture: v3 pattern. p5.js draws; ONE paused GSAP timeline owns
+  time. window.__seek(t) renders one deterministic frame. ?t= stills,
+  ?clean=1 hides hint. No wall-clock, no unseeded random, noiseSeed fixed.
+-->
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<script src="cast/pippa.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">ep1 s5 · tommy the turtle &nbsp;—&nbsp; add <b>?t=8.0</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261017;          // own sky family for the pond night
+const SCENE_LEN = 20.76;        // EXACT s5_turtle.mp3 duration
+const WATER_Y = 400;
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+const WATER_STOPS = [
+  [0.00, [ 28,  46,  74]],
+  [0.55, [ 16,  28,  52]],
+  [1.00, [  8,  14,  32]],
+];
+
+const MOON_SPOT = { x: 300, y: 150, s: 0.5 };
+const TOMMY_START = { x: 450, y: 570 };
+const TOMMY_HOME  = { x: 950, y: 590 };
+const TOMMY_CTRL  = { x: 700, y: 542 };   // journey arc control point
+
+// Pippa's zip: through the parting reeds, in an arc
+const ZIP = {
+  p0: { x: 1310, y: 480 },    // hidden behind the right reeds
+  p1: { x: 1060, y: 350 },    // arc control point
+  p2: { x:  700, y: 400 },    // hover point over the water
+};
+const LEAD = { x: 860, y: 428 };  // where she leads Tommy toward home
+
+/* ================= SEEDED RNG ================= */
+const rng = castMulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= PARAMS ================= */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* ================= TIMELINE STATE ================= */
+const state = { T: 0 };
+const cam = { x: -10, y: 0, zoom: 1 };            // ONE camera move: drift
+const moonState = { breath: -1, bobY: 9, glowPulse: 0.9, blink: 1 };
+const zip = { p: 0 };                            // Pippa's zip arc 0..1
+const lead = { p: 0 };                           // Pippa leading 0..1
+const journey = { p: 0 };                        // Tommy's journey 0..1
+const tommyState = { swim: 0, lookAmp: 1, blink: 1 };
+const pippaState = { glow: 0.9, lanternAmp: 0, flicker: 0 };
+const reedState = { part: 0 };                   // anticipation: reeds part
+
+let tl = null;
+
+function qbez(p0, p1, p2, t) {
+  const u = 1 - t;
+  return {
+    x: u*u*p0.x + 2*u*t*p1.x + t*t*p2.x,
+    y: u*u*p0.y + 2*u*t*p1.y + t*t*p2.y,
+  };
+}
+function qbezTan(p0, p1, p2, t) {
+  const u = 1 - t;
+  return {
+    x: 2*u*(p1.x - p0.x) + 2*t*(p2.x - p1.x),
+    y: 2*u*(p1.y - p0.y) + 2*t*(p2.y - p1.y),
+  };
+}
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+  tl.to(state, { T: SCENE_LEN, duration: SCENE_LEN, ease: "none" }, 0);
+
+  // CAMERA: one barely-there lateral drift, following the journey home
+  tl.to(cam, { x: 10, duration: SCENE_LEN, ease: "sine.inOut" }, 0);
+
+  // Uncle Moon's ambient life
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(moonState, { breath: 1, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(moonState, { blink: 1, duration: 4.3 - 0.16, ease: "none" })
+    .to(moonState, { blink: 0.15, duration: 0.08, ease: "power2.in" })
+    .to(moonState, { blink: 1, duration: 0.08, ease: "power2.out" });
+  tl.add(bl, 0);
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(moonState, { bobY: 9 }, { bobY: -9, duration: 6 / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(moonState, { glowPulse: 0.8 }, { glowPulse: 1.0, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+
+  // Tommy's slow blink (secondary action)
+  const tb = gsap.timeline({ repeat: 4000 });
+  tb.to(tommyState, { blink: 1, duration: 3.1, ease: "none" })
+    .to(tommyState, { blink: 0.12, duration: 0.12, ease: "power2.in" })
+    .to(tommyState, { blink: 1, duration: 0.14, ease: "power2.out" });
+  tl.add(tb, 0.7);
+
+  // THE STORY
+  const story = gsap.timeline();
+  story.addLabel("tommy-lost", 0);
+
+  // ANTICIPATION: the reeds part gently BEFORE Pippa zips through
+  story.addLabel("reeds-part", 5.6);
+  story.to(reedState, { part: 1, duration: 1.0, ease: "sine.inOut" }, 5.6);
+
+  // Pippa zips through in an arc
+  story.addLabel("pippa-zips", 6.64);
+  story.to(zip, { p: 1, duration: 3.16, ease: "sine.inOut" }, 6.64);
+
+  // her light starts swinging like a tiny lantern
+  story.addLabel("lantern-swing", 8.5);
+  story.to(pippaState, { lanternAmp: 1, duration: 1.5, ease: "sine.out" }, 8.5);
+  story.to(pippaState, { glow: 1.0, duration: 1.5, ease: "sine.inOut" }, 8.5);
+
+  // Tommy turns toward her
+  story.addLabel("follow-me", 11.51);
+  story.to(tommyState, { lookAmp: 0.12, duration: 1.0, ease: "sine.inOut" }, 11.51);
+
+  // the journey home, in an arc across the pond
+  story.addLabel("journey-home", 12.92);
+  story.to(journey, { p: 1, duration: 3.67, ease: "sine.inOut" }, 12.92);
+  story.to(lead, { p: 1, duration: 3.67, ease: "sine.inOut" }, 12.92);
+  story.to(tommyState, { swim: 1, duration: 0.8, ease: "sine.out" }, 12.92);
+  story.to(tommyState, { swim: 0, duration: 1.0, ease: "sine.inOut" }, 16.59);
+
+  // her light dims... flickers... sputters...
+  story.addLabel("pippa-dims", 16.59);
+  story.to(pippaState, { glow: 0.68, duration: 2.4, ease: "sine.inOut" }, 16.59);
+  story.addLabel("flicker", 18.99);
+  story.to(pippaState, { flicker: 1, duration: 1.77, ease: "sine.in" }, 18.99);
+
+  tl.add(story, 0);
+}
+
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SCENE_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* ================= WORLD (seeded, built once) ================= */
+let stars = [], motes = [], nebulae = [], shimmer = [], pads = [];
+let skyGrad = null, waterGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 200; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, WATER_Y - 30), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 26; i++) {
+    motes.push({ x: rr(0, W), y0: rr(WATER_Y, H), vy: rr(4, 12), s: rr(2, 4),
+                 a: rr(0.10, 0.22), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 700,  y: 170, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1150, y: 300, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+  ];
+  for (let i = 0; i < 22; i++) {
+    shimmer.push({ x: rr(40, W - 40), y: rr(WATER_Y + 30, H - 20),
+                   w: rr(30, 90), sp: rr(0.3, 1.1), ph: rr(0, Math.PI * 2),
+                   a: rr(0.05, 0.12) });
+  }
+  pads = [
+    { x: 890, y: 640, s: 1.0, ph: 0.4 },
+    { x: 1010, y: 668, s: 1.25, ph: 2.2 },
+    { x: 800, y: 678, s: 0.8, ph: 4.0 },
+  ];
+}
+
+/* ================= P5 LIFECYCLE ================= */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = castLinGrad(window, 0, 0, 0, H, SKY_STOPS);
+  waterGrad = castLinGrad(window, 0, WATER_Y, 0, H, WATER_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) { window.__seek(T_FIXED); noLoop(); }
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT % SCENE_LEN);
+}
+
+function applyCamera() {
+  translate(W / 2, H / 2);
+  scale(cam.zoom);
+  translate(-W / 2 + cam.x, -H / 2 + cam.y);
+}
+
+function pippaPos() {
+  // leg 1: zip arc through the reeds; leg 2: leading toward home
+  if (lead.p > 0.0005) {
+    const z = qbez(ZIP.p0, ZIP.p1, ZIP.p2, 1);
+    return { x: lerp(z.x, LEAD.x, lead.p), y: lerp(z.y, LEAD.y, lead.p),
+             flying: lead.p < 0.999 };
+  }
+  const bp = qbez(ZIP.p0, ZIP.p1, ZIP.p2, zip.p);
+  const tan = qbezTan(ZIP.p0, ZIP.p1, ZIP.p2, zip.p);
+  const flying = zip.p > 0.0005 && zip.p < 0.9995;
+  return { x: bp.x, y: bp.y, flying,
+           lean: flying ? 0.18 * Math.atan2(tan.y, tan.x) : 0 };
+}
+
+function tommyPos() {
+  return qbez(TOMMY_START, TOMMY_CTRL, TOMMY_HOME, journey.p);
+}
+
+function renderFrame() {
+  const t = state.T;
+
+  push();
+  applyCamera();
+
+  drawSky();
+  drawNebulae(t);
+  drawStars(t);
+
+  // THE LAW: Uncle Moon in every frame, watching from the sky
+  drawUncleMoon(window, MOON_SPOT.x, MOON_SPOT.y, MOON_SPOT.s, t,
+    { breath: moonState.breath, bobY: moonState.bobY,
+      glowPulse: moonState.glowPulse, blink: moonState.blink,
+      greetGlow: 1, tilt: -0.04, skyFill: skyGrad });
+
+  drawBank();
+  drawWater();
+  drawMoonReflection(t);
+  drawShimmer(t);
+  drawRipples(t);
+  drawLilyPads(t);
+  drawReeds(t, "back");
+
+  drawTommy(t);
+
+  // Pippa + her lantern swing (secondary action)
+  const pp = pippaPos();
+  const swing = 30 * pippaState.lanternAmp * Math.sin((Math.PI * 2 * t) / 1.8);
+  const hoverY = pp.y + 7 * Math.sin((Math.PI * 2 * t) / 2.4);
+  // her glow pooling on the water beneath her
+  castRadialGlow(window, pp.x + swing * 0.4, WATER_Y + 130, 200,
+                 [255, 214, 130], 0.16 * pippaState.glow);
+  // the swinging lantern light itself
+  if (pippaState.lanternAmp > 0.01) {
+    castRadialGlow(window, pp.x + swing, hoverY + 8, 90,
+                   [255, 220, 140], 0.35 * pippaState.lanternAmp);
+  }
+  const fl = pippaState.flicker;
+  const sputter = fl * (0.10 + 0.05 * Math.sin(t * 9.0) + 0.03 * Math.sin(t * 23.7));
+  const glowVal = Math.max(0.25, pippaState.glow - sputter);
+  const onScreen = pp.x > -80 && pp.x < W + 80;
+  if (onScreen) {
+    drawPippa(window, pp.x, hoverY, 1.0, t,
+      { glow: glowVal, tilt: (pp.lean || 0) + 0.12 * Math.sin((Math.PI * 2 * t) / 3.6) });
+  }
+
+  drawReeds(t, "front");
+  drawMotes(t);
+  pop();
+
+  drawVignette();
+}
+
+/* ================= SKY ================= */
+function drawSky() {
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(-200, -200, W + 400, H + 400);
+}
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 90 * (noise(n.ph, t * 0.015) - 0.5) * 2;
+    const y = n.y + 45 * (noise(n.ph + 90, t * 0.012) - 0.5) * 2;
+    castRadialGlow(window, x, y, n.r, n.col, n.a);
+  }
+}
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const dx = 14 * (noise(s.phase, t * 0.010) - 0.5) * 2;
+    const dy = 10 * (noise(s.phase + 40, t * 0.008) - 0.5) * 2;
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const wander = 0.80 + 0.40 * noise(s.phase + 80, t * 0.05);
+    const a = s.baseA * tw * wander;
+    ctx.fillStyle = `rgba(${s.col[0]},${s.col[1]},${s.col[2]},${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x + dx, s.y + dy, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x + dx - L, s.y + dy, s.x + dx + L, s.y + dy);
+      line(s.x + dx, s.y + dy - L, s.x + dx, s.y + dy + L);
+      noStroke();
+    }
+  }
+}
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ================= POND ================= */
+function drawBank() {
+  noStroke();
+  fill(14, 18, 36);
+  ellipse(W / 2, WATER_Y + 46, W + 500, 120);
+}
+function drawWater() {
+  const ctx = drawingContext;
+  ctx.fillStyle = waterGrad;
+  ctx.fillRect(-200, WATER_Y, W + 400, H - WATER_Y + 200);
+}
+function drawMoonReflection(t) {
+  // shimmering column of moonlight on the water
+  noStroke();
+  for (let i = 0; i < 12; i++) {
+    const y = 428 + i * 23;
+    const depth = (y - 428) / 280;
+    const w = 26 + depth * 66;
+    const x = MOON_SPOT.x + 14 * Math.sin(t * 1.2 + y * 0.03);
+    const a = 0.30 * (1 - depth) + 0.05;
+    fill(255, 238, 200, a * 255);
+    ellipse(x, y, w, 6.5);
+  }
+}
+function drawShimmer(t) {
+  noStroke();
+  for (const s of shimmer) {
+    const a = s.a * (0.6 + 0.4 * Math.sin(Math.PI * 2 * t * s.sp + s.ph));
+    fill(150, 190, 220, a * 255);
+    ellipse(s.x, s.y, s.w, 4);
+  }
+}
+function drawRipples(t) {
+  // secondary: ripples expanding from Tommy as he moves and breathes
+  const tp = tommyPos();
+  noFill();
+  for (let i = 0; i < 3; i++) {
+    const ph = (t * 0.35 + i / 3) % 1;
+    const r = 30 + 120 * ph;
+    const a = 0.20 * (1 - ph) * (0.4 + 0.6 * tommyState.swim + 0.3);
+    stroke(150, 190, 220, Math.min(0.28, a) * 255);
+    strokeWeight(2.5);
+    ellipse(tp.x, tp.y + 16, r * 2, r * 0.5);
+  }
+  noStroke();
+}
+function drawLilyPads(t) {
+  noStroke();
+  for (const pd of pads) {
+    const bob = 3 * Math.sin((Math.PI * 2 * t) / 3.4 + pd.ph);
+    push();
+    translate(pd.x, pd.y + bob);
+    scale(pd.s, pd.s);
+    fill(52, 96, 66);
+    arc(0, 0, 92, 92, 0.35, Math.PI * 2 - 0.35, PIE);
+    fill(66, 116, 80);
+    arc(-6, -5, 70, 70, 0.35, Math.PI * 2 - 0.35, PIE);
+    pop();
+  }
+}
+
+/* Reeds: back layer (behind Tommy) and front layer (a few near blades).
+ * The entry cluster near x=1010 PARTS as anticipation before Pippa zips. */
+function reedBlade(bx, baseY, hgt, sway, partBend, seedPh, t) {
+  const tipX = bx + sway + partBend;
+  const tipY = baseY - hgt;
+  noFill();
+  stroke(52, 96, 70); strokeWeight(7); strokeCap(ROUND);
+  bezier(bx, baseY, bx + sway * 0.3, baseY - hgt * 0.6, tipX, tipY);
+  noStroke();
+  // cattail on some blades
+  if (seedPh % 3 < 1) {
+    noStroke(); fill(110, 82, 52);
+    ellipse(tipX, tipY - 8, 14, 26);
+  }
+}
+function drawReeds(t, layer) {
+  const clusters = layer === "back"
+    ? [ { x: 110, n: 7, entry: false }, { x: 1180, n: 6, entry: false },
+        { x: 1010, n: 5, entry: true } ]
+    : [ { x: 40, n: 3, entry: false }, { x: 1250, n: 3, entry: false } ];
+  for (const c of clusters) {
+    for (let i = 0; i < c.n; i++) {
+      const bx = c.x + (i - (c.n - 1) / 2) * 26 + ((i * 37) % 13) - 6;
+      const hgt = 190 + ((i * 53) % 90);
+      const ph = i * 1.7 + c.x * 0.01;
+      const sway = 10 * Math.sin((Math.PI * 2 * t) / 2.6 + ph);
+      // anticipation: entry reeds bend aside before she arrives
+      const dir = i < c.n / 2 ? -1 : 1;
+      const partBend = c.entry ? dir * 46 * reedState.part : 0;
+      reedBlade(bx, H + 20, hgt, sway, partBend, i, t);
+    }
+  }
+}
+function drawMotes(t) {
+  // fireflies drifting over the water
+  for (const m of motes) {
+    let y = m.y0 - ((t * m.vy) % (H - WATER_Y + 40));
+    if (y < WATER_Y) y += (H - WATER_Y + 40);
+    const x = m.x + 40 * (noise(m.phase, t * 0.06) - 0.5) * 2;
+    const tw = 0.5 + 0.5 * Math.sin((Math.PI * 2 * t) / 2.2 + m.phase);
+    castRadialGlow(window, x, y, m.s * 2.4, [255, 240, 210], m.a * tw);
+  }
+}
+
+/* ================= TOMMY THE TURTLE (one-shot character) ================= */
+function drawTommy(t) {
+  const tp = tommyPos();
+  const x = tp.x, y = tp.y;
+  const swim = tommyState.swim;
+  const look = 24 * tommyState.lookAmp * Math.sin((Math.PI * 2 * t) / 3.7);
+  const bobY = 4 * Math.sin((Math.PI * 2 * t) / 3.1);
+  const paddle = swim * Math.sin((Math.PI * 2 * t) / 1.3);
+
+  push();
+  translate(x, y + bobY);
+
+  // soft shadow on the water
+  noStroke();
+  fill(6, 12, 24, 110);
+  ellipse(0, 30, 160, 26);
+
+  // flippers (secondary: they paddle while he swims)
+  push();
+  translate(-52, 18); rotate(-0.5 + paddle * 0.4);
+  fill(96, 128, 100); ellipse(0, 0, 46, 22);
+  pop();
+  push();
+  translate(48, 20); rotate(0.5 - paddle * 0.4);
+  fill(96, 128, 100); ellipse(0, 0, 50, 24);
+  pop();
+
+  // shell rim + dome
+  noStroke();
+  fill(94, 126, 98);
+  ellipse(0, 8, 172, 40);
+  const domeG = drawingContext.createRadialGradient(-30, -40, 10, 0, 0, 95);
+  domeG.addColorStop(0, "rgb(150,182,150)");
+  domeG.addColorStop(1, "rgb(118,152,122)");
+  drawingContext.fillStyle = domeG;
+  drawingContext.beginPath();
+  drawingContext.ellipse(0, 8, 80, 52, 0, Math.PI, Math.PI * 2);
+  drawingContext.fill();
+  // shell spots
+  fill(168, 196, 168, 200);
+  circle(-38, -22, 20); circle(8, -34, 24); circle(44, -18, 17);
+  circle(-8, -8, 14); circle(38, -2, 12);
+
+  // head (front, right side), turning as he searches
+  const hx = 82 + look * 0.6;
+  fill(158, 188, 158);
+  circle(hx, -8, 54);
+  // sleepy eyes with a slow blink
+  const eyeH = Math.max(2.5, 15 * tommyState.blink);
+  const ex = hx - 4 + look * 0.25, ey = -16;
+  noStroke();
+  fill(255, 255, 255);
+  ellipse(ex - 11, ey, 17, eyeH * 1.35);
+  ellipse(ex + 11, ey, 17, eyeH * 1.35);
+  if (tommyState.blink > 0.4) {
+    fill(48, 44, 62);
+    circle(ex - 11, ey + 1, 8);
+    circle(ex + 11, ey + 1, 8);
+    fill(255, 255, 255);
+    circle(ex - 13, ey - 1, 2.6);
+    circle(ex + 9, ey - 1, 2.6);
+  }
+  // gentle smile
+  noFill();
+  stroke(70, 90, 72); strokeWeight(3); strokeCap(ROUND);
+  arc(hx + 2, -2, 20, 12, Math.PI * 0.2, Math.PI * 0.8);
+  noStroke();
+  // rosy cheek
+  castRadialGlow(window, hx - 20, 2, 8, [255, 150, 150], 0.4);
+
+  pop();
+}
+</script>
+</body>
+</html>

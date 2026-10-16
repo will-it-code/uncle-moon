@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ep1 Trial - Scene 3: Worry (Pippa's light dims)</title>
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<script src="cast/pippa.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">ep1 trial - s3 worry (uncle moon watches) &nbsp;-&nbsp; add <b>?t=10.0</b> for a still frame</div>
+<script>
+"use strict";
+
+/* CONFIG */
+const W = 1280, H = 720;
+const SEED = 20261016;
+const SCENE_LEN = 18.912;   /* EXACT VO duration (s3_worry.mp3) */
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const MOON_SPOT = { x: 1050, y: 160, s: 0.5 };
+const LEAF = { x: 560, y: 588 };
+const PIPPA_SPOT = { x: 560, y: 516 };
+
+/* SEEDED RNG */
+const rng = castMulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* PARAMS */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* TIMELINE STATE */
+const state = { T: 0 };
+const moonState = { breath: -1, bobY: 9, glowPulse: 0.85, blink: 1 };
+const cam = { x: 620, y: 400, zoom: 1 };
+const pg = { base: 1.0, flick: 0 };
+const pippaTilt = { v: 0 };
+const leafT = { w: 0.25 };
+const gradeO = { a: 0 };
+
+let tl = null;
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+  tl.to(state, { T: SCENE_LEN, duration: SCENE_LEN, ease: "none" }, 0);
+
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(moonState, { breath: 1, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(moonState, { blink: 1, duration: 5.2 - 0.16, ease: "none" })
+    .to(moonState, { blink: 0.15, duration: 0.08, ease: "power2.in" })
+    .to(moonState, { blink: 1, duration: 0.08, ease: "power2.out" });
+  tl.add(bl, 0);
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(moonState, { bobY: 9 }, { bobY: -9, duration: 6 / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(moonState, { glowPulse: 0.78 }, { glowPulse: 0.92, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+
+  /* camera: ONE move, slow tender push-in */
+  tl.to(cam, { zoom: 1.10, duration: 16, ease: "sine.inOut" }, 0);
+
+  /* the story: her light's small, sad journey */
+  const story = gsap.timeline();
+  story.addLabel("something-wrong", 0);
+  /* ANTICIPATION: sputter starts BEFORE "Oh no" (~7.0s) */
+  story.addLabel("sputter", 4.5);
+  story.to(pg, { flick: 1, duration: 2.5, ease: "sine.inOut" }, 4.5);
+  story.to(pg, { base: 0.85, duration: 2.5, ease: "sine.inOut" }, 4.5);
+  story.to(leafT, { w: 1, duration: 14, ease: "sine.inOut" }, 4.5);
+  story.addLabel("afraid", 7.5);
+  story.to(pg, { base: 0.6, duration: 2, ease: "sine.inOut" }, 7.5);
+  story.to(pippaTilt, { v: 0.10, duration: 2.5, ease: "sine.inOut" }, 7.5);
+  story.to(gradeO, { a: 0.16, duration: 9, ease: "sine.inOut" }, 7.5);
+  story.to(pg, { base: 0.4, duration: 4.4, ease: "sine.inOut" }, 9.5);
+  story.addLabel("smaller", 13.9);
+  story.to(pg, { base: 0.25, duration: 3.1, ease: "sine.inOut" }, 13.9);
+  story.to(pippaTilt, { v: 0.16, duration: 3.5, ease: "sine.inOut" }, 13.9);
+  tl.add(story, 0);
+  window.__story = story;   // inspectable labels for verification
+}
+
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SCENE_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* WORLD */
+let stars = [], motes = [], nebulae = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 230; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, H * 0.94), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 34; i++) {
+    motes.push({ x: rr(0, W), y0: rr(0, H), vy: rr(6, 20), s: rr(2, 5),
+                 a: rr(0.08, 0.20), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 300,  y: 200, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1000, y: 480, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+    { x: 640,  y: 620, r: 460, col: [200, 110, 160], a: 0.08, ph: 4.2 },
+  ];
+}
+
+/* P5 LIFECYCLE */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = castLinGrad(window, 0, 0, 0, H, SKY_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) { window.__seek(T_FIXED); noLoop(); }
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT % SCENE_LEN);
+}
+
+function renderFrame() {
+  const t = state.T;
+
+  push();
+  translate(W / 2, H / 2);
+  scale(cam.zoom);
+  translate(-cam.x, -cam.y);
+
+  drawSky();
+  drawNebulae(t);
+  drawStars(t);
+  drawShootingStar(t);
+
+  drawUncleMoon(window, MOON_SPOT.x, MOON_SPOT.y, MOON_SPOT.s, t,
+    { breath: moonState.breath, bobY: moonState.bobY,
+      glowPulse: moonState.glowPulse, blink: moonState.blink,
+      greetGlow: 1, tilt: 0.08, skyFill: skyGrad });
+
+  drawGround();
+  drawStem();
+  drawLeaf(t);
+  drawPippaLayer(t);
+  drawDust(t);
+  pop();
+
+  if (gradeO.a > 0.004) {
+    const ctx = drawingContext;
+    ctx.fillStyle = "rgba(24, 34, 88, " + gradeO.a.toFixed(3) + ")";
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  drawVignette();
+}
+
+/* SKY LAYERS */
+function drawSky() {
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(-200, -200, W + 400, H + 400);
+}
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 90 * (noise(n.ph, t * 0.015) - 0.5) * 2;
+    const y = n.y + 45 * (noise(n.ph + 90, t * 0.012) - 0.5) * 2;
+    castRadialGlow(window, x, y, n.r, n.col, n.a);
+  }
+}
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const dx = 14 * (noise(s.phase, t * 0.010) - 0.5) * 2;
+    const dy = 10 * (noise(s.phase + 40, t * 0.008) - 0.5) * 2;
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const wander = 0.80 + 0.40 * noise(s.phase + 80, t * 0.05);
+    const a = s.baseA * tw * wander;
+    ctx.fillStyle = "rgba(" + s.col[0] + "," + s.col[1] + "," + s.col[2] + "," + a.toFixed(3) + ")";
+    ctx.beginPath(); ctx.arc(s.x + dx, s.y + dy, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x + dx - L, s.y + dy, s.x + dx + L, s.y + dy);
+      line(s.x + dx, s.y + dy - L, s.x + dx, s.y + dy + L);
+      noStroke();
+    }
+  }
+}
+function drawShootingStar(t) {
+  const cyc = t % 8;
+  if (cyc < 2.5 || cyc > 3.5) return;
+  const p = (cyc - 2.5);
+  const hx = 1080 - 340 * p, hy = 80 + 190 * p;
+  const ctx = drawingContext;
+  const tx2 = hx + 340 * 0.30, ty2 = hy - 190 * 0.30;
+  const lg = ctx.createLinearGradient(hx, hy, tx2, ty2);
+  lg.addColorStop(0, "rgba(255,246,224,0.9)");
+  lg.addColorStop(1, "rgba(255,246,224,0)");
+  ctx.strokeStyle = lg; ctx.lineCap = "round";
+  ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  castRadialGlow(window, hx, hy, 26, [255, 246, 224], 0.8);
+}
+
+/* GROUND + LEAF */
+function drawGround() {
+  noStroke();
+  fill(13, 16, 38);
+  ellipse(W / 2 - 160, H + 190, 1500, 380);
+  fill(8, 10, 26);
+  ellipse(W / 2 + 200, H + 250, 1750, 420);
+}
+
+function drawStem() {
+  /* the leaf's plant: a curved stem rising from the meadow floor */
+  noFill();
+  stroke(46, 88, 60); strokeWeight(14); strokeCap(ROUND);
+  bezier(LEAF.x - 62, 745, LEAF.x - 44, 682, LEAF.x - 12, 632, LEAF.x, LEAF.y + 16);
+  noStroke();
+  /* one small side leaf */
+  push();
+  translate(LEAF.x - 40, 674); rotate(-0.5);
+  fill(52, 96, 66);
+  ellipse(0, 0, 72, 30);
+  pop();
+  noStroke();
+}
+
+function drawLeaf(t) {
+  const w = leafT.w;
+  const rx = 2.4 * w * Math.sin(t * 31);
+  const ry = 1.5 * w * Math.cos(t * 27);
+  push();
+  translate(LEAF.x + rx, LEAF.y + ry);
+  rotate(0.014 * w * Math.sin(t * 23));
+
+  const ctx = drawingContext;
+  noStroke();
+  const lg = ctx.createLinearGradient(-120, 0, 120, 0);
+  lg.addColorStop(0, "rgb(44,84,58)");
+  lg.addColorStop(0.5, "rgb(62,112,76)");
+  lg.addColorStop(1, "rgb(44,84,58)");
+  ctx.fillStyle = lg;
+  ctx.beginPath();
+  ctx.moveTo(-120, 0);
+  ctx.quadraticCurveTo(-60, -52, 0, -46);
+  ctx.quadraticCurveTo(60, -52, 120, 0);
+  ctx.quadraticCurveTo(60, 44, 0, 40);
+  ctx.quadraticCurveTo(-60, 44, -120, 0);
+  ctx.closePath(); ctx.fill();
+  stroke(140, 180, 140, 130); strokeWeight(3);
+  line(-105, 0, 105, 0);
+  strokeWeight(2);
+  const veins = [-70, -35, 0, 35, 70];
+  for (let vi = 0; vi < veins.length; vi++) {
+    const vx = veins[vi];
+    line(vx, 0, vx - 18, -22);
+    line(vx, 0, vx - 18, 22);
+  }
+  noStroke();
+  castRadialGlow(window, -30, -18, 70, [200, 220, 255], 0.10);
+  pop();
+}
+
+/* PIPPA */
+function drawPippaLayer(t) {
+  const sput = 1 - pg.flick * 0.45 * (noise(t * 9.7) - 0.5) * 2;
+  const drop = (pg.flick > 0.5 && noise(t * 3.3 + 7.7) > 0.90) ? 0.55 : 1.0;
+  const g = Math.max(0.05, pg.base * sput * drop);
+  castRadialGlow(window, PIPPA_SPOT.x, PIPPA_SPOT.y + 40, 200 * g + 30,
+                 [255, 214, 130], 0.22 * g);
+  const hoverY = PIPPA_SPOT.y + 5 * Math.sin((Math.PI * 2 * t) / 2.9);
+  drawPippa(window, PIPPA_SPOT.x, hoverY, 1.0, t,
+    { glow: g, tilt: pippaTilt.v });
+}
+
+function drawDust(t) {
+  for (const m of motes) {
+    let y = (m.y0 - t * m.vy) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = m.x + 40 * (noise(m.phase, t * 0.06) - 0.5) * 2;
+    castRadialGlow(window, x, y, m.s * 2.4, [255, 240, 210], m.a);
+  }
+}
+
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

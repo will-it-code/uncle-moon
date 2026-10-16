@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scene — Baby Bird's Nest (Uncle Moon watches)</title>
+<!--
+  SCENE · baby bird's nest — multi-character composition proof
+  ----------------------------------------------------------------------------
+  VISUAL GRAMMAR LAW: Uncle Moon appears in EVERY frame. He is the
+  storyteller; here he watches from the upper sky (half scale, calm,
+  angled gently toward the nest below) while the story plays out.
+
+  Story beats (~6s), directed by ONE paused GSAP timeline:
+    "bird-afraid"   @0s   — baby bird trembles in its nest, afraid of the dark
+    "pippa-arrives" @1.8s — Pippa flies in from the right, glow approaching
+    "bird-calm"     @3.8s — her light washes the nest; the bird relaxes
+
+  Architecture: v3 pattern. p5.js draws; GSAP owns time. Cast members come
+  from cast/uncle-moon.js and cast/pippa.js (parameterized, pixel-identical
+  to their prototypes). window.__seek(t) renders one deterministic frame.
+  ?t=SECONDS still · ?clean=1 hides hint. No wall-clock, no unseeded random.
+-->
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<script src="cast/pippa.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">scene · baby bird's nest (uncle moon watches) &nbsp;—&nbsp; add <b>?t=2.0</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261016;          // same sky family as the v3 moon
+const SCENE_LEN = 6;            // seconds of story
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const MOON_SPOT = { x: 1060, y: 165, s: 0.5 };   // the watcher, upper sky
+const NEST = { x: 430, y: 505 };
+const BIRD = { x: 430, y: 468 };
+
+/* ================= SEEDED RNG ================= */
+const rng = castMulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= PARAMS ================= */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* ================= TIMELINE STATE ================= */
+const state = { T: 0 };                                   // master clock
+const moonState = { breath: -1, bobY: 9, glowPulse: 0.9, blink: 1 };
+const pippa = { x: 1350, y: 260 };                        // starts off-screen right
+const pippaState = { glow: 0.9, wash: 0, tilt: 0 };
+const birdState = { tremble: 1, calm: 0 };
+
+let tl = null;
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+  tl.to(state, { T: SCENE_LEN, duration: SCENE_LEN, ease: "none" }, 0);
+
+  // — Uncle Moon's ambient life (same loops as v3) —
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(moonState, { breath: 1, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(moonState, { blink: 1, duration: 4.3 - 0.16, ease: "none" })
+    .to(moonState, { blink: 0.15, duration: 0.08, ease: "power2.in" })
+    .to(moonState, { blink: 1, duration: 0.08, ease: "power2.out" });
+  tl.add(bl, 0);
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(moonState, { bobY: 9 }, { bobY: -9, duration: 6 / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(moonState, { glowPulse: 0.8 }, { glowPulse: 1.0, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+
+  // — the story: three labeled beats —
+  const story = gsap.timeline();
+  story.addLabel("bird-afraid", 0);
+  story.addLabel("pippa-arrives", 1.8);
+  story.to(pippa, { x: 480, y: 350, duration: 1.8, ease: "sine.inOut" }, 1.8);
+  story.to(pippaState, { wash: 1, duration: 1.0, ease: "sine.out" }, 2.6);
+  story.to(pippaState, { glow: 1.05, duration: 1.0, ease: "sine.out" }, 2.6);
+  story.addLabel("bird-calm", 3.8);
+  story.to(birdState, { tremble: 0, duration: 1.0, ease: "power2.out" }, 3.8);
+  story.to(birdState, { calm: 1, duration: 1.2, ease: "sine.inOut" }, 3.8);
+  story.to(pippa, { x: 430, y: 330, duration: 1.6, ease: "sine.inOut" }, 3.8);
+  tl.add(story, 0);
+}
+
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SCENE_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* ================= WORLD (seeded, built once) ================= */
+let stars = [], motes = [], nebulae = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 230; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, H * 0.94), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 34; i++) {
+    motes.push({ x: rr(0, W), y0: rr(0, H), vy: rr(6, 20), s: rr(2, 5),
+                 a: rr(0.08, 0.20), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 300,  y: 200, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1000, y: 480, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+    { x: 640,  y: 620, r: 460, col: [200, 110, 160], a: 0.08, ph: 4.2 },
+  ];
+}
+
+/* ================= P5 LIFECYCLE ================= */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = castLinGrad(window, 0, 0, 0, H, SKY_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) { window.__seek(T_FIXED); noLoop(); }
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT % SCENE_LEN);
+}
+
+function renderFrame() {
+  const t = state.T;
+  drawSky();
+  drawNebulae(t);
+  drawStars(t);
+  drawShootingStar(t);
+
+  // ★ THE LAW: Uncle Moon is in every frame, watching from the sky.
+  drawUncleMoon(window, MOON_SPOT.x, MOON_SPOT.y, MOON_SPOT.s, t,
+    { breath: moonState.breath, bobY: moonState.bobY,
+      glowPulse: moonState.glowPulse, blink: moonState.blink,
+      greetGlow: 1, tilt: -0.05, skyFill: skyGrad });
+
+  drawBranchAndNest();
+  drawBird(t);
+
+  // Pippa's light washing over the nest
+  if (pippaState.wash > 0.01) {
+    castRadialGlow(window, NEST.x, NEST.y - 60, 300, [255, 214, 130],
+                   0.30 * pippaState.wash);
+  }
+  const hoverY = pippa.y + 8 * Math.sin((Math.PI * 2 * t) / 2.4);
+  drawPippa(window, pippa.x, hoverY, 1.0, t,
+    { glow: pippaState.glow, tilt: 0.15 * Math.sin((Math.PI * 2 * t) / 3.6) });
+
+  drawDust(t);
+  drawVignette();
+}
+
+/* ================= SKY LAYERS ================= */
+function drawSky() {
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 90 * (noise(n.ph, t * 0.015) - 0.5) * 2;
+    const y = n.y + 45 * (noise(n.ph + 90, t * 0.012) - 0.5) * 2;
+    castRadialGlow(window, x, y, n.r, n.col, n.a);
+  }
+}
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const dx = 14 * (noise(s.phase, t * 0.010) - 0.5) * 2;
+    const dy = 10 * (noise(s.phase + 40, t * 0.008) - 0.5) * 2;
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const wander = 0.80 + 0.40 * noise(s.phase + 80, t * 0.05);
+    const a = s.baseA * tw * wander;
+    ctx.fillStyle = `rgba(${s.col[0]},${s.col[1]},${s.col[2]},${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x + dx, s.y + dy, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x + dx - L, s.y + dy, s.x + dx + L, s.y + dy);
+      line(s.x + dx, s.y + dy - L, s.x + dx, s.y + dy + L);
+      noStroke();
+    }
+  }
+}
+function drawShootingStar(t) {
+  const cyc = t % 8;
+  if (cyc < 2.5 || cyc > 3.5) return;
+  const p = (cyc - 2.5);
+  const hx = 1080 - 340 * p, hy = 80 + 190 * p;
+  const ctx = drawingContext;
+  const tx2 = hx + 340 * 0.30, ty2 = hy - 190 * 0.30;
+  const lg = ctx.createLinearGradient(hx, hy, tx2, ty2);
+  lg.addColorStop(0, "rgba(255,246,224,0.9)");
+  lg.addColorStop(1, "rgba(255,246,224,0)");
+  ctx.strokeStyle = lg; ctx.lineCap = "round";
+  ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  castRadialGlow(window, hx, hy, 26, [255, 246, 224], 0.8);
+}
+function drawDust(t) {
+  for (const m of motes) {
+    let y = (m.y0 - t * m.vy) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = m.x + 40 * (noise(m.phase, t * 0.06) - 0.5) * 2;
+    castRadialGlow(window, x, y, m.s * 2.4, [255, 240, 210], m.a);
+  }
+}
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ================= SET: branch + twig nest ================= */
+function drawBranchAndNest() {
+  noFill();
+  stroke(88, 62, 42); strokeWeight(30); strokeCap(ROUND);
+  bezier(-40, 570, 150, 548, 300, 522, 445, 508);
+  noStroke();
+  // sleepy leaves
+  noStroke(); fill(46, 88, 60);
+  ellipse(170, 528, 52, 24);
+  ellipse(310, 506, 44, 20);
+  fill(38, 74, 52);
+  ellipse(240, 540, 40, 18);
+
+  // twig nest: stacked ellipses + rim twigs
+  const nx = NEST.x, ny = NEST.y;
+  noStroke();
+  fill(96, 70, 48);  ellipse(nx, ny, 200, 74);
+  fill(78, 56, 38);  ellipse(nx, ny - 12, 168, 58);
+  fill(56, 40, 28);  ellipse(nx, ny - 22, 126, 40);
+  stroke(72, 52, 36); strokeWeight(4); strokeCap(ROUND);
+  for (let i = 0; i <= 10; i++) {
+    const a = Math.PI * (0.05 + 0.90 * i / 10);
+    const rx = 92, ry = 34;
+    const x1 = nx - rx * Math.cos(a), y1 = ny - 8 - ry * Math.sin(a);
+    line(x1 - 14, y1 + 4, x1 + 14, y1 - 6);
+  }
+  noStroke();
+}
+
+/* ================= BABY BIRD (one-shot character) ================= */
+function drawBird(t) {
+  const bx = BIRD.x, by = BIRD.y;
+  const tr = birdState.tremble;          // 1 = afraid, 0 = cozy
+  const calm = birdState.calm;           // 0 → 1 as Pippa's light arrives
+  const jx = tr * 2.4 * Math.sin(t * 43);
+  const jy = tr * 1.6 * Math.cos(t * 37);
+  const breathe = 1 + 0.02 * Math.sin((Math.PI * 2 * t) / 2.8);
+
+  push();
+  translate(bx + jx, by + jy);
+  scale(breathe, 2 - breathe);
+
+  // fluffy round body
+  noStroke();
+  fill(168, 186, 218);
+  circle(-15, 8, 54); circle(15, 8, 54); circle(0, -10, 58);
+  // soft belly
+  fill(208, 218, 240);
+  ellipse(0, 16, 54, 44);
+  // folded wings
+  fill(140, 160, 198);
+  ellipse(-28, 10, 24, 36);
+  ellipse(28, 10, 24, 36);
+  // head tuft
+  stroke(168, 186, 218); strokeWeight(5); strokeCap(ROUND);
+  line(-7, -34, -13, -48);
+  line(5, -35, 9, -50);
+  line(0, -34, 0, -46);
+  noStroke();
+  // tiny beak
+  fill(245, 183, 120);
+  triangle(-8, -4, 8, -4, 0, 9);
+
+  // eyes: big and round when afraid, soft closed arcs when calm
+  const eyeY = -16;
+  if (calm < 0.5) {
+    const gx = Math.max(-5, Math.min(5, (pippa.x - bx) * 0.012));
+    const gy = Math.max(-4, Math.min(4, (pippa.y - by) * 0.012));
+    fill(255, 255, 255);
+    circle(-16, eyeY, 27); circle(16, eyeY, 27);
+    fill(48, 44, 62);
+    circle(-16 + gx, eyeY + gy, 13); circle(16 + gx, eyeY + gy, 13);
+    fill(255, 255, 255);
+    circle(-18 + gx, eyeY - 3 + gy, 4.5); circle(14 + gx, eyeY - 3 + gy, 4.5);
+  } else {
+    noFill();
+    stroke(70, 64, 88); strokeWeight(5); strokeCap(ROUND);
+    arc(-16, eyeY, 27, 17, Math.PI * 0.15, Math.PI * 0.85);
+    arc(16, eyeY, 27, 17, Math.PI * 0.15, Math.PI * 0.85);
+    noStroke();
+  }
+
+  // rosy cheeks
+  castRadialGlow(window, -27, 2, 9, [255, 150, 150], 0.45);
+  castRadialGlow(window, 27, 2, 9, [255, 150, 150], 0.45);
+
+  pop();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<style>html,body{margin:0;padding:0;background:#060a18;overflow:hidden}</style>
+</head><body>
+<script>
+// Marvellous-moon sample v2 (4.5s).
+// Canonical Uncle Moon geometry/identity (cast/uncle-moon.js) + professional
+// render stack: one light direction (upper-left), layered blend passes,
+// light-true craters, feathered dark side, rim light, grain, atmosphere.
+const W = 1280, H = 720, DUR = 4.5;
+let tl, skyG;
+const MOON = { x: 640, y: 438, s: 1.47, R: 150 };
+const INK = [96, 76, 56];
+
+function mulberry32(a){return function(){a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+
+/* canonical overdamped pompom spring — deterministic, pre-rolled from t=-3 */
+function moonSpringLag(t){
+  const wn = Math.PI*2*1.1, zeta = 1.35, dt = 1/120;
+  const w = Math.PI*2/6.0;
+  let sx=0, sy=26, vx=0, vy=0;
+  const t0=-3, steps=Math.max(1,Math.round((t-t0)/dt)), h=(t-t0)/steps;
+  for(let i=1;i<=steps;i++){
+    const ti=t0+i*h;
+    const bobV=9*w*Math.cos(w*ti+1.0);
+    const txg=5*Math.sin((Math.PI*2*ti)/2.3+2.0), tyg=26-0.35*bobV;
+    const ax=wn*wn*(txg-sx)-2*zeta*wn*vx, ay=wn*wn*(tyg-sy)-2*zeta*wn*vy;
+    vx+=ax*h; vy+=ay*h; sx+=vx*h; sy+=vy*h;
+  }
+  return {x:sx,y:sy};
+}
+
+function setup(){
+  createCanvas(W, H); pixelDensity(1);
+  buildSky();
+  const st = { breath: 0, blink: 1, bob: 0 };
+  window.__state = st;
+  tl = gsap.timeline({ paused: true });
+  tl.to(st, { breath: 1, duration: DUR, ease: "sine.inOut" }, 0);
+  tl.to(st, { bob: 1, duration: DUR, ease: "sine.inOut" }, 0);
+  tl.to(st, { blink: 0.15, duration: 0.16, ease: "sine.in" }, 2.2);
+  tl.to(st, { blink: 1, duration: 0.24, ease: "sine.out" }, 2.36);
+  window.__seek = (t) => { tl.seek(t); draw(t); window.__frameReady = true; };
+  window.__frameReady = true;
+}
+
+function buildSky(){
+  skyG = createGraphics(W, H);
+  const ctx = skyG.drawingContext;
+  const gr = ctx.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, "#04060f"); gr.addColorStop(0.55, "#0a1230"); gr.addColorStop(1, "#16224d");
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  const rnd = mulberry32(7);
+  for(let i=0;i<190;i++){
+    skyG.noStroke(); skyG.fill(255,255,255,(0.25+rnd()*0.65)*255);
+    skyG.circle(rnd()*W, rnd()*H*0.85, (rnd()*1.6+0.4)*2);
+  }
+}
+
+function expGlow(p, r, rgb, alpha, decay){
+  // stacked radial falloff approximating castExpGlow
+  const ctx = p.drawingContext;
+  ctx.save(); ctx.globalCompositeOperation = "lighter";
+  for(let i=0;i<4;i++){
+    const rr = r*(0.35+0.22*i);
+    const g = ctx.createRadialGradient(0,0,0,0,0,rr);
+    g.addColorStop(0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha*(1-i*0.22)})`);
+    g.addColorStop(1, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0,0,rr,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+function moonFace(p, blink){
+  const fx=-95, fy=8;
+  p.noFill(); p.stroke(INK[0],INK[1],INK[2]); p.strokeCap(p.ROUND);
+  const eyeH = Math.max(3, 48*blink);
+  p.strokeWeight(9);
+  p.arc(fx-38, fy-14, 48, eyeH, Math.PI*0.15, Math.PI*0.85);
+  p.arc(fx+38, fy-14, 48, eyeH, Math.PI*0.15, Math.PI*0.85);
+  p.strokeWeight(10);
+  p.arc(fx, fy+28, 88, 64, Math.PI*0.15, Math.PI*0.85);
+  p.noStroke();
+  // blush
+  const ctx=p.drawingContext; ctx.save(); ctx.globalCompositeOperation="multiply";
+  ctx.fillStyle="rgba(240,150,140,0.35)";
+  for(const s of [-1,1]){ ctx.beginPath(); ctx.ellipse(fx+s*48, fy+18, 16, 10, 0, 0, Math.PI*2); ctx.fill(); }
+  ctx.restore();
+}
+
+function moonCap(p, t, lag){
+  const ctx=p.drawingContext;
+  p.push(); p.translate(2,-105); p.rotate(0.004*(lag.x-5*Math.sin((Math.PI*2*t)/2.3+2.0))); p.translate(-2,105);
+  const grad=ctx.createLinearGradient(0,-270,0,-100);
+  grad.addColorStop(0,"rgb(150,160,255)"); grad.addColorStop(1,"rgb(92,102,220)");
+  ctx.fillStyle=grad;
+  ctx.beginPath();
+  ctx.moveTo(-85,-115);
+  ctx.quadraticCurveTo(-62,-200,5,-265);
+  ctx.quadraticCurveTo(52,-212,90,-105);
+  ctx.quadraticCurveTo(2,-92,-85,-115);
+  ctx.closePath(); ctx.fill();
+  // fabric shading: multiply away from key light + soft fold shadows
+  ctx.save(); ctx.globalCompositeOperation="multiply";
+  const sh=ctx.createLinearGradient(-85,0,90,0);
+  sh.addColorStop(0,"rgba(255,255,255,0)"); sh.addColorStop(1,"rgba(60,70,140,0.42)");
+  ctx.fillStyle=sh; ctx.fill();
+  ctx.fillStyle="rgba(70,80,160,0.30)";
+  ctx.beginPath(); ctx.ellipse(-30,-160,16,42,0.35,0,Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(28,-140,13,34,0.3,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+  p.noFill(); p.stroke(70,78,190,90); p.strokeWeight(8); p.strokeCap(p.ROUND);
+  p.bezier(-32,-198,-8,-178,12,-156,30,-130);
+  p.noStroke();
+  const tx=5, ty=-265, px=tx+lag.x, py=ty+lag.y;
+  p.stroke(200,205,255,160); p.strokeWeight(4); p.line(tx,ty,px,py); p.noStroke();
+  const pg=ctx.createRadialGradient(px-6,py-7,2,px,py,20);
+  pg.addColorStop(0,"rgb(255,255,255)"); pg.addColorStop(1,"rgb(205,210,235)");
+  ctx.fillStyle=pg; ctx.beginPath(); ctx.arc(px,py,19,0,Math.PI*2); ctx.fill();
+  p.pop();
+}
+
+function drawMoon(t){
+  const st=window.__state, R=MOON.R, ctx=drawingContext;
+  const lag=moonSpringLag(t);
+  const sY=1+0.015*Math.sin(st.breath*Math.PI*2), sX=1/sY;
+  const bobY=9*Math.sin(st.bob*Math.PI*2);
+  push(); translate(MOON.x, MOON.y+bobY); scale(MOON.s*sX, MOON.s*sY);
+
+  // halo: canonical triple bloom
+  expGlow(this,560,[255,238,196],0.10,3.4);
+  expGlow(this,360,[255,241,203],0.17,2.7);
+  expGlow(this,225,[255,244,210],0.24,2.1);
+
+  // lit disc (canonical gradient, brightest upper-left)
+  let g=ctx.createRadialGradient(-R*0.45,-R*0.5,R*0.1,0,0,R*1.25);
+  g.addColorStop(0,"rgb(255,250,232)"); g.addColorStop(0.55,"rgb(255,243,214)"); g.addColorStop(1,"rgb(214,196,170)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.fill();
+
+  // ---- render-stack passes, clipped to the disc
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
+  ctx.globalCompositeOperation="multiply";  // form shadow gathers lower-right
+  g=ctx.createRadialGradient(R*0.7,R*0.7,R*0.1,R*0.7,R*0.7,R*1.5);
+  g.addColorStop(0,"rgba(150,120,150,0.42)"); g.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=g; ctx.fillRect(-R,-R,R*2,R*2);
+  ctx.globalCompositeOperation="screen";    // key light kisses upper-left
+  g=ctx.createRadialGradient(-R*0.55,-R*0.55,R*0.05,-R*0.55,-R*0.55,R*0.95);
+  g.addColorStop(0,"rgba(255,253,244,0.55)"); g.addColorStop(1,"rgba(255,255,255,0)");
+  ctx.fillStyle=g; ctx.fillRect(-R,-R,R*2,R*2);
+  ctx.globalCompositeOperation="source-over";
+  ctx.restore();
+
+  // craters: canonical positions, true light-direction shading
+  for(const [cx,cy,cr] of [[-75,-55,15],[-100,55,12],[-30,90,10]]){
+    g=ctx.createRadialGradient(cx-cr*0.3,cy-cr*0.3,cr*0.1,cx,cy,cr);
+    g.addColorStop(0,"rgb(232,201,143)"); g.addColorStop(0.8,"rgb(217,180,124)"); g.addColorStop(1,"rgb(201,160,104)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cx,cy,cr,0,Math.PI*2); ctx.fill();
+    ctx.save(); ctx.globalCompositeOperation="multiply";
+    g=ctx.createRadialGradient(cx+cr*0.4,cy+cr*0.4,cr*0.05,cx+cr*0.4,cy+cr*0.4,cr*0.9);
+    g.addColorStop(0,"rgba(110,80,110,0.45)"); g.addColorStop(1,"rgba(255,255,255,0)");
+    ctx.fillStyle=g; ctx.beginPath(); ctx.arc(cx,cy,cr,0,Math.PI*2); ctx.fill();
+    ctx.restore();
+    noFill(); stroke(255,252,240,110); strokeWeight(2.5);
+    arc(cx,cy,cr*1.7,cr*1.7,Math.PI*1.05,Math.PI*1.45); noStroke();
+  }
+
+  // dark side: feathered melt into the sky (canonical position)
+  g=ctx.createRadialGradient(105,-60,132*0.45,105,-60,132);
+  g.addColorStop(0,"rgb(11,17,48)"); g.addColorStop(0.80,"rgb(11,17,48)"); g.addColorStop(1,"rgba(11,17,48,0)");
+  ctx.fillStyle=g; ctx.beginPath(); ctx.arc(105,-60,132,0,Math.PI*2); ctx.fill();
+
+  // rim light: canonical upper-left + subtle dark-side rim (the pro touch)
+  noFill(); stroke(255,252,240,110); strokeWeight(5);
+  arc(0,0,R*1.97,R*1.97,Math.PI*1.02,Math.PI*1.45); noStroke();
+  ctx.save(); ctx.globalCompositeOperation="lighter";
+  ctx.strokeStyle="rgba(255,244,220,0.5)"; ctx.lineWidth=4;
+  ctx.shadowColor="rgba(255,236,200,0.7)"; ctx.shadowBlur=12;
+  ctx.beginPath(); ctx.arc(0,0,R-3,Math.PI*0.12,Math.PI*0.55); ctx.stroke();
+  ctx.restore();
+
+  moonFace(this, st.blink);
+  moonCap(this, t, lag);
+
+  // grain, seeded (skip the dark-side disc)
+  const rnd=mulberry32(42);
+  ctx.save(); ctx.beginPath(); ctx.arc(0,0,R,0,Math.PI*2); ctx.clip();
+  for(let i=0;i<2400;i++){
+    const a=rnd()*Math.PI*2, d=Math.sqrt(rnd())*R;
+    const x=Math.cos(a)*d, y=Math.sin(a)*d;
+    const bx=x-105, by=y+60;
+    if(bx*bx+by*by < Math.pow(132*0.92,2)) continue;
+    ctx.fillStyle=rnd()>0.5?`rgba(120,85,60,${0.05+rnd()*0.07})`:`rgba(255,250,240,${0.05+rnd()*0.07})`;
+    ctx.fillRect(x,y,1.4,1.4);
+  }
+  ctx.restore();
+  pop();
+}
+
+function draw(t){
+  image(skyG,0,0);
+  drawMoon(t);
+  // atmospheric wash marries moon to night
+  drawingContext.save();
+  drawingContext.globalCompositeOperation="overlay";
+  drawingContext.fillStyle="rgba(70,100,190,0.14)";
+  drawingContext.fillRect(0,0,W,H);
+  drawingContext.restore();
+}
+</script>
+</body></html>

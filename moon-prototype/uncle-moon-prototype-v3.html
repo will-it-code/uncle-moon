@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Uncle Moon — living prototype v3 (GSAP timeline edition)</title>
+<!--
+  UNCLE MOON · living prototype v3 — GSAP timeline edition (Pillar 1)
+  ------------------------------------------------------------------------------
+  Same character, same p5.js drawing code as v2. What changed is WHO OWNS TIME:
+  one paused GSAP timeline drives every primary motion. p5.js only draws.
+
+  Architecture:
+    - `state` holds every animated value (bobY, breath, blink, glowPulse, T).
+    - ONE paused gsap.timeline owns them all, with director LABELS:
+        "greet"   @0s — a gentle 1.6s glow swell, like he notices you
+        "breathe" @0s — squash & stretch loop (sine.inOut, ±1.5%)
+        "blink"   @0s — calm blink cycle (power2.in/out, no overshoot)
+        "bob"     @0s — gentle vertical drift (sine.inOut)
+    - Ambient systems (star twinkle, Perlin drift, dust, meteors, pompom
+      spring) stay pure functions of state.T — the timeline's master clock.
+      No wall-clock, no rAF state, no unseeded random. Everything seekable.
+    - window.__seek(t): seek the paused timeline to exactly t seconds,
+      render ONE frame synchronously, set window.__frameReady = true.
+      This is the fast path: no page reload per frame.
+
+  HOW TO USE:
+  - Open in a browser: he animates live (virtual clock, same timeline).
+  - ?t=SECONDS -> one deterministic still frame.
+  - ?clean=1 -> hide the corner hint.
+
+  Determinism rules respected: no Date.now(), no Math.random() (seeded
+  mulberry32 only), no CSS transitions, noiseSeed fixed.
+-->
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">uncle moon · living prototype v3 (gsap timeline) &nbsp;—&nbsp; add <b>?t=1.1</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG (unchanged from v2) ================= */
+const W = 1280, H = 720;
+const SEED = 20261016;
+
+const MOON = { x: 640, y: 340, r: 150 };
+const CREAM = [255, 243, 214];
+const INK   = [96, 76, 56];
+const CHEEK = [255, 150, 150];
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const BREATH_PERIOD = 4.5;
+const SQUASH_AMT    = 0.015;
+const BOB_PERIOD    = 6.0;
+const BOB_AMT       = 9;
+const BLINK_PERIOD  = 4.3;
+const BLINK_DUR     = 0.16;
+const SHOT_LEN      = 3600;   // master-clock span (longer than any real shot)
+
+/* ================= SEEDED RNG ================= */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= PARAMS ================= */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* ================= TIMELINE STATE ================= */
+// Every animated value lives here. GSAP owns them; p5 only reads.
+const state = {
+  T: 0,            // master clock — ambient systems read this
+  breath: -1,      // -1..1 breathing phase
+  bobY: BOB_AMT,   // px vertical drift
+  glowPulse: 0.9,  // 0.8..1.0 halo strength
+  blink: 1,        // 1 open .. 0.15 closed
+  greetGlow: 0,    // 0..1 entrance swell
+};
+
+let tl = null;
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+
+  // master clock: ambient loops read state.T (pure functions of it)
+  tl.to(state, { T: SHOT_LEN, duration: SHOT_LEN, ease: "none" }, 0);
+
+  // GREET — gentle 1.6s glow swell on shot open, like he notices you
+  tl.fromTo(state, { greetGlow: 0 },
+    { greetGlow: 1, duration: 1.6, ease: "sine.out" }, 0);
+  tl.addLabel("greet", 0);
+
+  // BREATHE — squash & stretch loop, ±1.5%, volume-preserving in render
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(state, { breath: 1, duration: BREATH_PERIOD / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  tl.addLabel("breathe", 0);
+
+  // BLINK — calm cycle: long hold open, quick soft close, no overshoot
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(state, { blink: 1, duration: BLINK_PERIOD - BLINK_DUR, ease: "none" })
+    .to(state, { blink: 0.15, duration: BLINK_DUR / 2, ease: "power2.in" })
+    .to(state, { blink: 1, duration: BLINK_DUR / 2, ease: "power2.out" });
+  tl.add(bl, 0);
+  tl.addLabel("blink", 0);
+
+  // BOB — gentle vertical drift
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(state, { bobY: BOB_AMT },
+    { bobY: -BOB_AMT, duration: BOB_PERIOD / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  tl.addLabel("bob", 0);
+
+  // GLOW — halo breathing with the breath cycle
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(state, { glowPulse: 0.8 },
+    { glowPulse: 1.0, duration: BREATH_PERIOD / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+}
+
+/* The fast path: seek the paused timeline, render one frame synchronously. */
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SHOT_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* ================= WORLD (built once, seeded — unchanged) ================= */
+let stars = [], motes = [], nebulae = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 230; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, H * 0.94), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 34; i++) {
+    motes.push({ x: rr(0, W), y0: rr(0, H), vy: rr(6, 20), s: rr(2, 5),
+                 a: rr(0.08, 0.20), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 300,  y: 200, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1000, y: 480, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+    { x: 640,  y: 620, r: 460, col: [200, 110, 160], a: 0.08, ph: 4.2 },
+  ];
+}
+
+/* ================= GRADIENT HELPERS (unchanged) ================= */
+function linGrad(x0, y0, x1, y1, stops) {
+  const g = drawingContext.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, `rgb(${c[0]},${c[1]},${c[2]})`);
+  return g;
+}
+function radialGlow(x, y, r, rgb, alpha) {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
+  g.addColorStop(0.55, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha * 0.45})`);
+  g.addColorStop(1.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+function expGlow(x, y, r, rgb, peak, fall) {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  const STOPS = 9;
+  for (let i = 0; i <= STOPS; i++) {
+    const f = i / STOPS;
+    const a = peak * Math.exp(-fall * f * f);
+    g.addColorStop(f, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a.toFixed(4)})`);
+  }
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+/* ================= P5 LIFECYCLE ================= */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = linGrad(0, 0, 0, H, SKY_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) {
+    window.__seek(T_FIXED);   // still-frame mode: render once
+    noLoop();
+  }
+  // else: live mode — draw() advances a virtual clock through the timeline
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT);
+}
+
+/* Every frame is drawn here, reading only timeline state. */
+function renderFrame() {
+  const t = state.T;
+  drawSky();
+  drawNebulae(t);
+  drawStars(t);
+  drawShootingStar(t);
+  drawHills();
+  drawMoon();
+  drawDust(t);
+  drawVignette();
+}
+
+/* ================= LAYERS (drawing unchanged, t = state.T) ================= */
+function drawSky() {
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 90 * (noise(n.ph, t * 0.015) - 0.5) * 2;
+    const y = n.y + 45 * (noise(n.ph + 90, t * 0.012) - 0.5) * 2;
+    radialGlow(x, y, n.r, n.col, n.a);
+  }
+}
+
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const dx = 14 * (noise(s.phase, t * 0.010) - 0.5) * 2;
+    const dy = 10 * (noise(s.phase + 40, t * 0.008) - 0.5) * 2;
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const wander = 0.80 + 0.40 * noise(s.phase + 80, t * 0.05);
+    const a = s.baseA * tw * wander;
+    ctx.fillStyle = `rgba(${s.col[0]},${s.col[1]},${s.col[2]},${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x + dx, s.y + dy, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x + dx - L, s.y + dy, s.x + dx + L, s.y + dy);
+      line(s.x + dx, s.y + dy - L, s.x + dx, s.y + dy + L);
+      noStroke();
+    }
+  }
+}
+
+function drawShootingStar(t) {
+  const cyc = t % 8;
+  if (cyc < 2.5 || cyc > 3.5) return;
+  const p = (cyc - 2.5);
+  const hx = 1080 - 340 * p, hy = 80 + 190 * p;
+  const ctx = drawingContext;
+  const tx2 = hx + 340 * 0.30, ty2 = hy - 190 * 0.30;
+  const lg = ctx.createLinearGradient(hx, hy, tx2, ty2);
+  lg.addColorStop(0, "rgba(255,246,224,0.9)");
+  lg.addColorStop(1, "rgba(255,246,224,0)");
+  ctx.strokeStyle = lg; ctx.lineCap = "round";
+  ctx.lineWidth = 7;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  radialGlow(hx, hy, 26, [255, 246, 224], 0.8);
+}
+
+function drawHills() {
+  noStroke();
+  fill(13, 16, 38);
+  ellipse(W / 2 - 160, H + 190, 1500, 380);
+  fill(8, 10, 26);
+  ellipse(W / 2 + 200, H + 250, 1750, 420);
+}
+
+function drawDust(t) {
+  for (const m of motes) {
+    let y = (m.y0 - t * m.vy) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = m.x + 40 * (noise(m.phase, t * 0.06) - 0.5) * 2;
+    radialGlow(x, y, m.s * 2.4, [255, 240, 210], m.a);
+  }
+}
+
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ================= UNCLE MOON (time now comes from `state`) ================= */
+// Overdamped spring follow for secondary motion (pure function of t —
+// deterministic, pre-rolled from t=-3 so every frame is settled).
+function springLag(t) {
+  const wn = Math.PI * 2 * 1.1, zeta = 1.35, dt = 1 / 120;
+  const w = Math.PI * 2 / BOB_PERIOD;
+  let sx = 0, sy = 26, vx = 0, vy = 0;
+  const t0 = -3;
+  const steps = Math.max(1, Math.round((t - t0) / dt));
+  const h = (t - t0) / steps;
+  for (let i = 1; i <= steps; i++) {
+    const ti = t0 + i * h;
+    const bobV = BOB_AMT * w * Math.cos(w * ti + 1.0);
+    const txg = 5 * Math.sin((Math.PI * 2 * ti) / 2.3 + 2.0);
+    const tyg = 26 - 0.35 * bobV;
+    const ax = wn * wn * (txg - sx) - 2 * zeta * wn * vx;
+    const ay = wn * wn * (tyg - sy) - 2 * zeta * wn * vy;
+    vx += ax * h; vy += ay * h;
+    sx += vx * h; sy += vy * h;
+  }
+  return { x: sx, y: sy };
+}
+
+function drawMoon() {
+  const t = state.T;
+  // squash & stretch from the timeline's breath value (±1.5%, volume kept)
+  const sY = 1 + SQUASH_AMT * state.breath;
+  const sX = 1 / sY;
+  const bob = state.bobY;
+  const greetF = 0.72 + 0.28 * state.greetGlow;   // entrance swell
+  const glowPulse = state.glowPulse;
+  const lag = springLag(t);
+
+  push();
+  translate(MOON.x, MOON.y + bob);
+  scale(sX, sY);
+
+  // halo: three stacked exponential-decay blooms, breathing + greeting
+  expGlow(0, 0, 560, [255, 238, 196], 0.10 * glowPulse * greetF, 3.4);
+  expGlow(0, 0, 360, [255, 241, 203], 0.17 * glowPulse * greetF, 2.7);
+  expGlow(0, 0, 225, [255, 244, 210], 0.24 * glowPulse * greetF, 2.1);
+
+  const R = MOON.r, ctx = drawingContext;
+
+  let g = ctx.createRadialGradient(-R*0.45, -R*0.5, R*0.1, 0, 0, R*1.25);
+  g.addColorStop(0.00, "rgb(255,250,232)");
+  g.addColorStop(0.55, `rgb(${CREAM[0]},${CREAM[1]},${CREAM[2]})`);
+  g.addColorStop(1.00, "rgb(214,196,170)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+
+  const craters = [[-75, -55, 15], [-100, 55, 12], [-30, 90, 10]];
+  for (const [cx, cy, cr] of craters) {
+    radialGlow(cx, cy, cr, [188, 168, 148], 0.35);
+    noFill(); stroke(255, 252, 240, 90); strokeWeight(2.5);
+    arc(cx, cy, cr * 1.7, cr * 1.7, Math.PI * 1.05, Math.PI * 1.45);
+    noStroke();
+  }
+
+  ctx.fillStyle = skyGrad;
+  ctx.beginPath(); ctx.arc(105, -60, R * 0.88, 0, Math.PI * 2); ctx.fill();
+
+  noFill(); stroke(255, 252, 240, 110); strokeWeight(5);
+  arc(0, 0, R * 1.97, R * 1.97, Math.PI * 1.02, Math.PI * 1.45);
+  noStroke();
+
+  drawFace();
+  drawNightcap(t, lag);
+
+  pop();
+}
+
+function drawFace() {
+  // blink comes straight off the timeline (1 open .. 0.15 shut)
+  const fx = -95, fy = 8;
+  noFill();
+  stroke(INK[0], INK[1], INK[2]); strokeWeight(9); strokeCap(ROUND);
+  const eyeH = Math.max(3, 48 * state.blink);
+  arc(fx - 38, fy - 14, 48, eyeH, Math.PI * 0.15, Math.PI * 0.85);
+  arc(fx + 38, fy - 14, 48, eyeH, Math.PI * 0.15, Math.PI * 0.85);
+  strokeWeight(10);
+  arc(fx, fy + 28, 88, 64, Math.PI * 0.15, Math.PI * 0.85);
+  noStroke();
+
+  radialGlow(fx - 48, fy + 18, 16, CHEEK, 0.50);
+  radialGlow(fx + 48, fy + 18, 16, CHEEK, 0.50);
+}
+
+function drawNightcap(t, lag) {
+  const ctx = drawingContext;
+
+  radialGlow(-10, -112, 58, [40, 30, 60], 0.25);
+
+  push();
+  translate(2, -105);
+  rotate(0.004 * (lag.x - 5 * Math.sin((Math.PI * 2 * t) / 2.3 + 2.0)));
+  translate(-2, 105);
+
+  const grad = ctx.createLinearGradient(0, -270, 0, -100);
+  grad.addColorStop(0, "rgb(150,160,255)");
+  grad.addColorStop(1, "rgb(92,102,220)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(-85, -115);
+  ctx.quadraticCurveTo(-62, -200, 5, -265);
+  ctx.quadraticCurveTo(52, -212, 90, -105);
+  ctx.quadraticCurveTo(2, -92, -85, -115);
+  ctx.closePath(); ctx.fill();
+
+  noFill(); stroke(70, 78, 190, 90); strokeWeight(8); strokeCap(ROUND);
+  bezier(-32, -198, -8, -178, 12, -156, 30, -130);
+  noStroke();
+
+  const tx = 5, ty = -265;
+  const px = tx + lag.x, py = ty + lag.y;
+  stroke(200, 205, 255, 160); strokeWeight(4);
+  line(tx, ty, px, py);
+  noStroke();
+  const pg = ctx.createRadialGradient(px - 6, py - 7, 2, px, py, 20);
+  pg.addColorStop(0, "rgb(255,255,255)");
+  pg.addColorStop(1, "rgb(205,210,235)");
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.arc(px, py, 19, 0, Math.PI * 2); ctx.fill();
+
+  pop();
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Living shader sky test (6s).
+// A fullscreen GLSL fragment shader paints a breathing fBm nebula +
+// twinkling stars; uTime is driven by __seek(t), so every frame is a pure
+// function of time (deterministic). p5 draws the moon + fireflies on a
+// transparent canvas composited above.
+const W = 1280, H = 720, DUR = 6;
+let gl, uTimeLoc, uResLoc, tl;
+const flies = [];
+for (let i = 0; i < 9; i++) flies.push({ x: 120 + i * 130, y: 560 + (i % 3) * 40, a: 0, ph: i * 1.7 });
+
+const FRAG = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453123); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1.0,0.0)), u.x),
+             mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int i=0;i<4;i++){ v += a*noise(p); p = p*2.03 + vec2(17.3,9.1); a *= 0.5; }
+  return v;
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 p = uv; p.x *= uRes.x / uRes.y;
+  float t = uTime * 0.02; // very slow: the sky breathes, never rushes
+
+  // midnight base gradient
+  vec3 col = mix(vec3(0.016,0.024,0.059), vec3(0.082,0.125,0.290), pow(uv.y, 1.25));
+
+  // nebula: domain-warped fbm for organic slow clouds
+  vec2 q = vec2(fbm(p*1.6 + vec2(t, 0.0)), fbm(p*1.6 + vec2(5.2,1.3) - t*0.7));
+  float neb = fbm(p*1.6 + 2.6*q);
+  vec3 nebCol = mix(vec3(0.10,0.075,0.24), vec3(0.21,0.11,0.28), q.y);
+  col += nebCol * smoothstep(0.42, 0.88, neb) * 0.38;
+
+  // milky-way band: faint diagonal river of light
+  float band = exp(-pow((uv.y - (0.64 - 0.28*uv.x))*3.2, 2.0));
+  col += vec3(0.09,0.08,0.15) * band * (0.35 + 0.65*neb);
+
+  // stars: hashed grid, gentle twinkle
+  vec2 sp = p * 42.0;
+  vec2 cell = floor(sp);
+  float h = hash(cell);
+  if(h > 0.93){
+    vec2 spos = vec2(hash(cell+7.13), hash(cell+3.71)) - 0.5;
+    float d = length(fract(sp) - 0.5 - spos*0.55);
+    float tw = 0.55 + 0.45*sin(uTime*(0.8+h*1.6) + h*43.0);
+    float star = smoothstep(0.09, 0.0, d) * tw;
+    star *= smoothstep(0.93, 0.995, h)*1.8 + 0.35;
+    col += vec3(1.0,0.97,0.90) * star;
+  }
+
+  // vignette: edges melt into warm darkness
+  float vig = smoothstep(1.30, 0.40, length(uv-0.5)*1.45);
+  col *= mix(0.72, 1.0, vig);
+
+  gl_FragColor = vec4(col, 1.0);
+}`;
+
+const VERT = `
+attribute vec2 aPos;
+void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+function initGL() {
+  const cv = document.getElementById('gl');
+  gl = cv.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  function sh(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(pr); gl.useProgram(pr);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  uResLoc = gl.getUniformLocation(pr, 'uRes');
+  uTimeLoc = gl.getUniformLocation(pr, 'uTime');
+  gl.uniform2f(uResLoc, W, H);
+  gl.viewport(0, 0, W, H);
+}
+
+function renderSky(t) {
+  gl.uniform1f(uTimeLoc, t);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initGL();
+  tl = gsap.timeline({ paused: true });
+  tl.to(flies, { a: 1, duration: 2.0, ease: "sine.inOut", stagger: 0.18 }, 0.8);
+  window.__seek = (t) => {
+    tl.seek(t);
+    renderSky(t);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear(); // transparent: the shader sky shows through
+  const ctx = drawingContext;
+  // moon: soft glowing disc, breathing
+  const br = 1 + 0.018 * Math.sin((t / DUR) * Math.PI * 2);
+  push(); translate(880, 250); scale(br);
+  castExpGlow(this, 0, 0, 340, [255, 238, 196], 0.16, 2.6);
+  castExpGlow(this, 0, 0, 210, [255, 243, 210], 0.22, 2.1);
+  const g = ctx.createRadialGradient(-40, -45, 10, 0, 0, 190);
+  g.addColorStop(0, "rgb(255,250,232)"); g.addColorStop(0.55, "rgb(255,243,214)"); g.addColorStop(1, "rgb(214,196,170)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(0, 0, 150, 0, Math.PI * 2); ctx.fill();
+  // craters with light-direction shading
+  for (const [cx, cy, cr] of [[-48, -36, 15], [-64, 36, 12], [-18, 58, 10]]) {
+    const cg = ctx.createRadialGradient(cx - cr * 0.3, cy - cr * 0.3, cr * 0.1, cx, cy, cr);
+    cg.addColorStop(0, "rgb(232,201,143)"); cg.addColorStop(1, "rgb(201,160,104)");
+    ctx.fillStyle = cg; ctx.beginPath(); ctx.arc(cx, cy, cr, 0, Math.PI * 2); ctx.fill();
+  }
+  // dark side melts into the shader sky
+  const dg = ctx.createRadialGradient(66, -38, 60, 66, -38, 132);
+  dg.addColorStop(0, "rgba(8,12,36,1)"); dg.addColorStop(0.8, "rgba(8,12,36,1)"); dg.addColorStop(1, "rgba(8,12,36,0)");
+  ctx.fillStyle = dg; ctx.beginPath(); ctx.arc(66, -38, 132, 0, Math.PI * 2); ctx.fill();
+  pop();
+  // fireflies drifting over the meadow
+  noStroke();
+  for (const f of flies) {
+    const fy = f.y + 14 * Math.sin(t * 0.9 + f.ph);
+    const fx = f.x + 10 * Math.sin(t * 0.5 + f.ph * 2.0);
+    castRadialGlow(this, fx, fy, 30 * f.a + 4, [255, 214, 130], 0.55 * f.a);
+    fill(255, 222, 150, 230 * f.a); circle(fx, fy, 7);
+  }
+}
+</script>
+</body></html>

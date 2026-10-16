@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Uncle Moon — living prototype</title>
+<!--
+  UNCLE MOON · living prototype (p5.js, canvas 2D)
+  ------------------------------------------------
+  A code-drawn, animated Uncle Moon: breathing glow, blinking happy face,
+  twinkling starfield, drifting dust, shooting stars, floppy nightcap with
+  a bobbling pompom. Nothing here is AI-generated imagery: every shape is
+  drawn in code, so he looks identical every episode.
+
+  HOW TO USE
+  - Open this file in a browser: he animates live.
+  - Add ?t=SECONDS (e.g. ?t=1.1) to render one deterministic still frame.
+    The animation is fully time-driven + seeded, so frame t is always
+    identical. This is how we extract PNG sequences for ffmpeg:
+      for each frame: screenshot ?t=<n/fps>  ->  frames/f%04d.png
+  - Add ?clean=1 to hide the corner hint below.
+
+  TUNING
+  - All look-and-feel lives in the CONFIG object at the top of the script.
+-->
+<script src="vendor/p5.min.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">uncle moon · living prototype &nbsp;—&nbsp; add <b>?t=1.1</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;          // canvas size (16:9, YouTube friendly)
+const SEED = 20261016;            // fixed seed -> identical output every run
+
+const MOON = { x: 640, y: 340, r: 150 };   // moon centre + radius
+const CREAM = [255, 243, 214];             // his cream colour
+const INK   = [96, 76, 56];               // face line colour
+const CHEEK = [255, 150, 150];             // rosy cheeks
+
+const SKY_STOPS = [                        // night-sky vertical gradient
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const BREATH_PERIOD = 4.5;    // seconds per gentle "breath"
+const BREATH_AMT    = 0.020;  // scale variation (2% — calm, not bouncy)
+const BOB_PERIOD    = 6.0;
+const BOB_AMT       = 9;      // px vertical drift
+const BLINK_PERIOD  = 4.3;    // a soft blink every ~4s
+const BLINK_DUR     = 0.16;
+
+/* ================= SEEDED RNG ================= */
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const rng = mulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= TIME ================= */
+// ?t=SECONDS renders a single deterministic still (used for frame extraction)
+const PARAMS = new URLSearchParams(location.search);
+const T_FIXED = PARAMS.has("t") ? parseFloat(PARAMS.get("t")) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+const nowT = () => (T_FIXED !== null ? T_FIXED : millis() / 1000);
+
+/* ================= WORLD (built once, seeded) ================= */
+let stars = [], motes = [], nebulae = [];
+let skyGrad = null;   // shared canvas gradient -> crescent "punch" blends perfectly
+
+function buildWorld() {
+  for (let i = 0; i < 230; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, H * 0.94), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 34; i++) {
+    motes.push({ x: rr(0, W), y0: rr(0, H), vy: rr(6, 20), s: rr(2, 5),
+                 a: rr(0.08, 0.20), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 300,  y: 200, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1000, y: 480, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+    { x: 640,  y: 620, r: 460, col: [200, 110, 160], a: 0.08, ph: 4.2 },
+  ];
+}
+
+/* ================= GRADIENT HELPERS ================= */
+function linGrad(x0, y0, x1, y1, stops) {
+  const g = drawingContext.createLinearGradient(x0, y0, x1, y1);
+  for (const [o, c] of stops) g.addColorStop(o, `rgb(${c[0]},${c[1]},${c[2]})`);
+  return g;
+}
+function radialGlow(x, y, r, rgb, alpha) {
+  // soft round glow: solid-ish core fading to transparent
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+  g.addColorStop(0.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`);
+  g.addColorStop(0.55, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha * 0.45})`);
+  g.addColorStop(1.0, `rgba(${rgb[0]},${rgb[1]},${rgb[2]},0)`);
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+}
+
+/* ================= P5 LIFECYCLE ================= */
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);          // deterministic pixels, fast headless renders
+  buildWorld();
+  skyGrad = linGrad(0, 0, 0, H, SKY_STOPS);
+}
+
+function draw() {
+  const t = nowT();
+  drawSky();
+  drawNebulae(t);
+  drawStars(t);
+  drawShootingStar(t);
+  drawHills();
+  drawMoon(t);
+  drawDust(t);
+  drawVignette();
+  window.__frameReady = true;   // signal for headless capture scripts
+  if (T_FIXED !== null) noLoop();
+}
+
+/* ================= LAYERS ================= */
+function drawSky() {
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 18 * Math.sin((Math.PI * 2 * t) / 23 + n.ph);
+    radialGlow(x, n.y, n.r, n.col, n.a);
+  }
+}
+
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const a = s.baseA * tw;
+    ctx.fillStyle = `rgba(${s.col[0]},${s.col[1]},${s.col[2]},${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {   // bright stars get a 4-point sparkle
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x - L, s.y, s.x + L, s.y);
+      line(s.x, s.y - L, s.x, s.y + L);
+      noStroke();
+    }
+  }
+}
+
+function drawShootingStar(t) {
+  // one gentle meteor every 8s
+  const cyc = t % 8;
+  if (cyc < 2.5 || cyc > 3.5) return;
+  const p = (cyc - 2.5);                       // 0..1
+  const hx = 1080 - 340 * p, hy = 80 + 190 * p;
+  const ctx = drawingContext;
+  const tx2 = hx + 340 * 0.30, ty2 = hy - 190 * 0.30;   // tail end
+  const lg = ctx.createLinearGradient(hx, hy, tx2, ty2);
+  lg.addColorStop(0, "rgba(255,246,224,0.9)");
+  lg.addColorStop(1, "rgba(255,246,224,0)");
+  ctx.strokeStyle = lg; ctx.lineCap = "round";
+  ctx.lineWidth = 7;                                     // soft outer streak
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  ctx.lineWidth = 2.5;                                   // bright core
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  radialGlow(hx, hy, 26, [255, 246, 224], 0.8);           // head glow
+}
+
+function drawHills() {
+  noStroke();
+  fill(13, 16, 38);   // far hill
+  ellipse(W / 2 - 160, H + 190, 1500, 380);
+  fill(8, 10, 26);    // near hill
+  ellipse(W / 2 + 200, H + 250, 1750, 420);
+}
+
+function drawDust(t) {
+  for (const m of motes) {
+    let y = (m.y0 - t * m.vy) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = m.x + 12 * Math.sin(Math.PI * 2 * t * 0.2 + m.phase);
+    radialGlow(x, y, m.s * 2.4, [255, 240, 210], m.a);
+  }
+}
+
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+
+/* ================= UNCLE MOON ================= */
+function drawMoon(t) {
+  const breathe = 1 + BREATH_AMT * Math.sin((Math.PI * 2 * t) / BREATH_PERIOD);
+  const bob = BOB_AMT * Math.sin((Math.PI * 2 * t) / BOB_PERIOD + 1.0);
+  const glowPulse = 0.90 + 0.10 * Math.sin((Math.PI * 2 * t) / BREATH_PERIOD - 0.6);
+
+  push();
+  translate(MOON.x, MOON.y + bob);
+  scale(breathe);
+
+  // --- halo: three breathing layers of warm light ---
+  radialGlow(0, 0, 460, [255, 240, 200], 0.11 * glowPulse);
+  radialGlow(0, 0, 300, [255, 242, 205], 0.20 * glowPulse);
+  radialGlow(0, 0, 200, [255, 244, 210], 0.26 * glowPulse);
+
+  const R = MOON.r, ctx = drawingContext;
+
+  // --- cream disc, softly shaded like a sphere lit from upper-left ---
+  let g = ctx.createRadialGradient(-R*0.45, -R*0.5, R*0.1, 0, 0, R*1.25);
+  g.addColorStop(0.00, "rgb(255,250,232)");
+  g.addColorStop(0.55, `rgb(${CREAM[0]},${CREAM[1]},${CREAM[2]})`);
+  g.addColorStop(1.00, "rgb(214,196,170)");
+  ctx.fillStyle = g;
+  ctx.beginPath(); ctx.arc(0, 0, R, 0, Math.PI * 2); ctx.fill();
+
+  // --- craters: soft dimples with a lit upper-left rim ---
+  const craters = [[-75, -55, 15], [-100, 55, 12], [-30, 90, 10]];
+  for (const [cx, cy, cr] of craters) {
+    radialGlow(cx, cy, cr, [188, 168, 148], 0.35);
+    noFill(); stroke(255, 252, 240, 90); strokeWeight(2.5);
+    arc(cx, cy, cr * 1.7, cr * 1.7, Math.PI * 1.05, Math.PI * 1.45);
+    noStroke();
+  }
+
+  // --- crescent cut: punch out with the exact sky gradient ---
+  // (slim punch -> fat crescent, so the whole face sits on cream)
+  ctx.fillStyle = skyGrad;
+  ctx.beginPath(); ctx.arc(105, -60, R * 0.88, 0, Math.PI * 2); ctx.fill();
+
+  // --- rim light along the upper-left limb ---
+  noFill(); stroke(255, 252, 240, 110); strokeWeight(5);
+  arc(0, 0, R * 1.97, R * 1.97, Math.PI * 1.02, Math.PI * 1.45);
+  noStroke();
+
+  drawFace(t);
+  drawNightcap(t);
+
+  pop();
+}
+
+function drawFace(t) {
+  // blink: happy closed eyes squash flat for a heartbeat
+  const bt = t % BLINK_PERIOD;
+  let squash = 1;
+  if (bt < BLINK_DUR) squash = 1 - Math.sin((bt / BLINK_DUR) * Math.PI) * 0.85;
+
+  const fx = -95, fy = 8;   // face centre, deep on the crescent
+  noFill();
+  stroke(INK[0], INK[1], INK[2]); strokeWeight(9); strokeCap(ROUND);
+  const eyeH = Math.max(3, 48 * squash);
+  arc(fx - 38, fy - 14, 48, eyeH, Math.PI * 0.15, Math.PI * 0.85);  // left eye ‿
+  arc(fx + 38, fy - 14, 48, eyeH, Math.PI * 0.15, Math.PI * 0.85);  // right eye ‿
+  strokeWeight(10);
+  arc(fx, fy + 28, 88, 64, Math.PI * 0.15, Math.PI * 0.85);         // smile
+  noStroke();
+
+  // rosy cheeks: soft radial blobs
+  radialGlow(fx - 48, fy + 18, 16, CHEEK, 0.50);
+  radialGlow(fx + 48, fy + 18, 16, CHEEK, 0.50);
+}
+
+function drawNightcap(t) {
+  const ctx = drawingContext;
+
+  // soft shadow the cap casts on the moon
+  radialGlow(-10, -112, 58, [40, 30, 60], 0.25);
+
+  // classic tall nightcap: clean triangle with softly curved sides,
+  // leaning a touch right, growing out of his head. base sits INSIDE
+  // the moon's top so it never floats.
+  const grad = ctx.createLinearGradient(0, -270, 0, -100);
+  grad.addColorStop(0, "rgb(150,160,255)");
+  grad.addColorStop(1, "rgb(92,102,220)");
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.moveTo(-85, -115);                              // base left
+  ctx.quadraticCurveTo(-62, -200, 5, -265);           // left edge to apex
+  ctx.quadraticCurveTo(52, -212, 90, -105);           // right edge back down
+  ctx.quadraticCurveTo(2, -92, -85, -115);            // base hugs the head
+  ctx.closePath(); ctx.fill();
+
+  // one soft fold for fabric feel
+  noFill(); stroke(70, 78, 190, 90); strokeWeight(8); strokeCap(ROUND);
+  bezier(-32, -198, -8, -178, 12, -156, 30, -130);
+  noStroke();
+
+  // pompom: hangs from the apex, swinging gently on its own rhythm
+  const tx = 5, ty = -265;
+  const swing = 0.22 * Math.sin((Math.PI * 2 * t) / 2.3 + 2.0);
+  const px = tx + 26 * Math.sin(swing), py = ty + 26 * Math.cos(swing);
+  stroke(200, 205, 255, 160); strokeWeight(4);
+  line(tx, ty, px, py);
+  noStroke();
+  const pg = ctx.createRadialGradient(px - 6, py - 7, 2, px, py, 20);
+  pg.addColorStop(0, "rgb(255,255,255)");
+  pg.addColorStop(1, "rgb(205,210,235)");
+  ctx.fillStyle = pg;
+  ctx.beginPath(); ctx.arc(px, py, 19, 0, Math.PI * 2); ctx.fill();
+}
+</script>
+</body>
+</html>

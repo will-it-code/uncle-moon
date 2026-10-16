@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ep1 S1 — Greeting (Uncle Moon welcomes you)</title>
+<!--
+  EP1 TRIAL · SCENE 1 — GREETING
+  ----------------------------------------------------------------------------
+  VO: build/ep1_trial_vo/s1_greeting.mp3 (19.56s, Beth).
+  "Hello, little star. Yes, you, warm under your blanket. I have been
+   waiting for you, up here in my quiet sky..."
+
+  VISUAL GRAMMAR LAW: Uncle Moon is in EVERY frame — here he takes center
+  stage, full frame, the welcome.
+
+  Direction (one paused GSAP timeline):
+    labels: hello@0 / waiting@4 / night-soft@8 / story-coming@11 /
+            are-you-cozy@15.5 / let-us-begin@17.6
+    camera: ONE move — breathing push-in 1.0 → 1.08 across the scene.
+    P0 ANTICIPATION @14.3: a beat before "Are you cozy?" he leans in and
+      his glow warms — the wind-up before the tenderest line.
+    P0 SECONDARY ACTION: star twinkle, nightcap sway (in cast), dust motes,
+      one shooting star while "warm under your blanket" (~3s).
+
+  Architecture: v3 pattern. p5.js draws; GSAP owns time. Uncle Moon comes
+  from cast/uncle-moon.js. window.__seek(t) renders one deterministic
+  frame. ?t=SECONDS still · ?clean=1 hides hint. No wall-clock, no unseeded
+  random, noiseSeed fixed. Calm easings only.
+-->
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<style>
+  html, body { margin: 0; padding: 0; background: #070818; height: 100%; }
+  body { display: flex; align-items: center; justify-content: center; }
+  canvas { display: block; box-shadow: 0 0 80px rgba(40,40,90,.55); }
+  #hint {
+    position: fixed; left: 12px; bottom: 10px; color: #8f93c9;
+    font: 12px/1.5 system-ui, sans-serif; opacity: .75; user-select: none;
+  }
+</style>
+</head>
+<body>
+<div id="hint">ep1 · s1 greeting &nbsp;—&nbsp; add <b>?t=2.0</b> for a still frame</div>
+<script>
+"use strict";
+
+/* ================= CONFIG ================= */
+const W = 1280, H = 720;
+const SEED = 20261016;            // same sky family as v3
+const SCENE_LEN = 19.56;          // EXACT VO duration (s1_greeting.mp3)
+
+const SKY_STOPS = [
+  [0.00, [  7,   8,  24]],
+  [0.45, [ 18,  21,  58]],
+  [0.75, [ 36,  29,  94]],
+  [1.00, [ 59,  42, 114]],
+];
+
+const MOON_SPOT = { x: 640, y: 330, s: 1.0 };   // center stage, full frame
+
+/* ================= SEEDED RNG ================= */
+const rng = castMulberry32(SEED);
+const rr = (lo, hi) => lo + rng() * (hi - lo);
+
+/* ================= PARAMS ================= */
+const PARAMS = new URLSearchParams(location.search);
+const _tq = PARAMS.get("t");
+const T_FIXED = (_tq !== null && _tq !== "" && !isNaN(parseFloat(_tq))) ? parseFloat(_tq) : null;
+if (PARAMS.has("clean")) document.getElementById("hint").style.display = "none";
+
+/* ================= TIMELINE STATE ================= */
+const state = { T: 0 };                                   // master clock
+const cam = { x: 0, y: 0, zoom: 1.0 };                     // the one camera move
+const moonState = {
+  breath: -1, bobY: 9, glowPulse: 0.9, blink: 1,
+  greetGlow: 0, tilt: 0, warm: 0,   // warm: anticipation glow (additive)
+};
+
+let tl = null;
+
+function buildTimeline() {
+  tl = gsap.timeline({ paused: true });
+  tl.to(state, { T: SCENE_LEN, duration: SCENE_LEN, ease: "none" }, 0);
+
+  // GREET — entrance swell, like he notices you arriving
+  tl.fromTo(moonState, { greetGlow: 0 },
+    { greetGlow: 1, duration: 2.2, ease: "sine.out" }, 0);
+
+  // ambient loops (v3 values — the calm baseline)
+  const br = gsap.timeline({ repeat: 4000, yoyo: true });
+  br.to(moonState, { breath: 1, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(br, 0);
+  const bl = gsap.timeline({ repeat: 4000 });
+  bl.to(moonState, { blink: 1, duration: 4.3 - 0.16, ease: "none" })
+    .to(moonState, { blink: 0.15, duration: 0.08, ease: "power2.in" })
+    .to(moonState, { blink: 1, duration: 0.08, ease: "power2.out" });
+  tl.add(bl, 0);
+  const bb = gsap.timeline({ repeat: 4000, yoyo: true });
+  bb.fromTo(moonState, { bobY: 9 }, { bobY: -9, duration: 6 / 2, ease: "sine.inOut" });
+  tl.add(bb, 0);
+  const gl = gsap.timeline({ repeat: 4000, yoyo: true });
+  gl.fromTo(moonState, { glowPulse: 0.8 },
+    { glowPulse: 1.0, duration: 4.5 / 2, ease: "sine.inOut" });
+  tl.add(gl, 0);
+
+  // CAMERA — the one move: breathing push-in, "come closer, you're safe"
+  tl.fromTo(cam, { zoom: 1.0 },
+    { zoom: 1.08, duration: SCENE_LEN, ease: "sine.inOut" }, 0);
+
+  // STORY beats, mapped to the VO
+  const story = gsap.timeline();
+  story.addLabel("hello", 0);            // "Hello, little star..."
+  story.addLabel("waiting", 4.0);        // "I have been waiting for you..."
+  story.addLabel("night-soft", 8.0);     // "The night is soft tonight..."
+  story.addLabel("story-coming", 11.0);  // "And I have a story for you..."
+  // ANTICIPATION @14.3 — a beat before "Are you cozy?": he leans in,
+  // glow warms. The wind-up before the tenderest line.
+  story.to(moonState, { tilt: -0.05, duration: 1.2, ease: "sine.inOut" }, 14.3);
+  story.to(moonState, { warm: 0.12, duration: 1.2, ease: "sine.inOut" }, 14.3);
+  story.addLabel("are-you-cozy", 15.5);  // "Are you cozy? Good."
+  story.addLabel("let-us-begin", 17.6);  // "...let us begin."
+  story.to(moonState, { tilt: 0, duration: 1.6, ease: "sine.inOut" }, 17.6);
+  story.to(moonState, { warm: 0, duration: 1.6, ease: "sine.inOut" }, 17.6);
+  tl.add(story, 0);
+}
+
+window.__seek = function (t) {
+  if (!tl) return;
+  tl.seek(Math.max(0, Math.min(t, SCENE_LEN - 0.01)));
+  renderFrame();
+  window.__frameReady = true;
+};
+
+/* ================= WORLD (seeded, built once) ================= */
+let stars = [], motes = [], nebulae = [];
+let skyGrad = null;
+
+function buildWorld() {
+  for (let i = 0; i < 230; i++) {
+    const tintRoll = rng();
+    stars.push({
+      x: rr(0, W), y: rr(0, H * 0.94), r: rr(0.6, 2.8),
+      baseA: rr(0.30, 1.0), speed: rr(0.4, 2.4), phase: rr(0, Math.PI * 2),
+      col: tintRoll < 0.8 ? [255, 255, 255]
+         : tintRoll < 0.9 ? [255, 220, 180] : [180, 200, 255],
+      sparkle: rng() < 0.06,
+    });
+  }
+  for (let i = 0; i < 34; i++) {
+    motes.push({ x: rr(0, W), y0: rr(0, H), vy: rr(6, 20), s: rr(2, 5),
+                 a: rr(0.08, 0.20), phase: rr(0, Math.PI * 2) });
+  }
+  nebulae = [
+    { x: 300,  y: 200, r: 380, col: [120, 100, 220], a: 0.14, ph: 0.0 },
+    { x: 1000, y: 480, r: 420, col: [ 80, 140, 180], a: 0.10, ph: 2.1 },
+    { x: 640,  y: 620, r: 460, col: [200, 110, 160], a: 0.08, ph: 4.2 },
+  ];
+}
+
+/* ================= P5 LIFECYCLE ================= */
+let liveT = 0;
+
+function setup() {
+  createCanvas(W, H);
+  pixelDensity(1);
+  noiseSeed(SEED);
+  buildWorld();
+  skyGrad = castLinGrad(window, 0, 0, 0, H, SKY_STOPS);
+  buildTimeline();
+  if (T_FIXED !== null) { window.__seek(T_FIXED); noLoop(); }
+}
+
+function draw() {
+  if (T_FIXED !== null) return;
+  liveT += Math.min(deltaTime, 100) / 1000;
+  window.__seek(liveT % SCENE_LEN);
+}
+
+function renderFrame() {
+  const t = state.T;
+  drawSky();                       // infinitely far — no camera
+
+  push();                          // ★ the camera: zoom about canvas center
+  translate(W / 2, H / 2);
+  scale(cam.zoom);
+  translate(-W / 2, -H / 2);
+  drawNebulae(t);
+  drawStars(t);
+  drawShootingStarOnce(t, 3.0, 1.1, 1050, 90, -300, 140);  // secondary
+  // ★ THE LAW: Uncle Moon, center stage, in every frame.
+  drawUncleMoon(window, MOON_SPOT.x, MOON_SPOT.y, MOON_SPOT.s, t,
+    { breath: moonState.breath, bobY: moonState.bobY,
+      glowPulse: moonState.glowPulse + moonState.warm,
+      blink: moonState.blink, greetGlow: moonState.greetGlow,
+      tilt: moonState.tilt, skyFill: skyGrad });
+  drawDust(t);
+  pop();
+
+  drawVignette();                  // lens effect — no camera
+}
+
+/* ================= SKY LAYERS ================= */
+function drawSky() {
+  const ctx = drawingContext;
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0, 0, W, H);
+}
+function drawNebulae(t) {
+  for (const n of nebulae) {
+    const x = n.x + 90 * (noise(n.ph, t * 0.015) - 0.5) * 2;
+    const y = n.y + 45 * (noise(n.ph + 90, t * 0.012) - 0.5) * 2;
+    castRadialGlow(window, x, y, n.r, n.col, n.a);
+  }
+}
+function drawStars(t) {
+  const ctx = drawingContext;
+  noStroke();
+  for (const s of stars) {
+    const dx = 14 * (noise(s.phase, t * 0.010) - 0.5) * 2;
+    const dy = 10 * (noise(s.phase + 40, t * 0.008) - 0.5) * 2;
+    const tw = 0.55 + 0.45 * Math.sin(Math.PI * 2 * t * s.speed + s.phase);
+    const wander = 0.80 + 0.40 * noise(s.phase + 80, t * 0.05);
+    const a = s.baseA * tw * wander;
+    ctx.fillStyle = `rgba(${s.col[0]},${s.col[1]},${s.col[2]},${a.toFixed(3)})`;
+    ctx.beginPath(); ctx.arc(s.x + dx, s.y + dy, s.r, 0, Math.PI * 2); ctx.fill();
+    if (s.sparkle && tw > 0.92) {
+      const L = s.r * 5 * (tw - 0.92) / 0.08;
+      stroke(255, 255, 255, 160 * a); strokeWeight(1.2);
+      line(s.x + dx - L, s.y + dy, s.x + dx + L, s.y + dy);
+      line(s.x + dx, s.y + dy - L, s.x + dx, s.y + dy + L);
+      noStroke();
+    }
+  }
+}
+/* One-shot shooting star: deterministic, timeline-driven. */
+function drawShootingStarOnce(t, t0, dur, x0, y0, dx, dy) {
+  if (t < t0 || t > t0 + dur) return;
+  const p = (t - t0) / dur;
+  const e = 1 - Math.pow(1 - p, 2);          // easeOutQuad
+  const fade = Math.sin(Math.PI * p);       // in-out alpha
+  const hx = x0 + dx * e, hy = y0 + dy * e;
+  const tx2 = hx - dx * 0.28, ty2 = hy - dy * 0.28;
+  const ctx = drawingContext;
+  const lg = ctx.createLinearGradient(hx, hy, tx2, ty2);
+  lg.addColorStop(0, `rgba(255,246,224,${(0.9 * fade).toFixed(3)})`);
+  lg.addColorStop(1, "rgba(255,246,224,0)");
+  ctx.strokeStyle = lg; ctx.lineCap = "round";
+  ctx.lineWidth = 6;
+  ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(tx2, ty2); ctx.stroke();
+  castRadialGlow(window, hx, hy, 24, [255, 246, 224], 0.75 * fade);
+}
+function drawDust(t) {
+  for (const m of motes) {
+    let y = (m.y0 - t * m.vy) % (H + 60);
+    if (y < 0) y += H + 60;
+    y -= 30;
+    const x = m.x + 40 * (noise(m.phase, t * 0.06) - 0.5) * 2;
+    castRadialGlow(window, x, y, m.s * 2.4, [255, 240, 210], m.a);
+  }
+}
+function drawVignette() {
+  const ctx = drawingContext;
+  const g = ctx.createRadialGradient(W/2, H/2, H*0.35, W/2, H/2, H*0.95);
+  g.addColorStop(0, "rgba(4,5,16,0)");
+  g.addColorStop(1, "rgba(4,5,16,0.45)");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+}
+</script>
+</body>
+</html>

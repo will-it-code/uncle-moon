@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="vendor/MotionPathPlugin.min.js"></script>
+<script src="vendor/CustomEase.min.js"></script>
+<script src="vendor/anime-4.5.0.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/pippa.js"></script>
+<script src="cast/motion.js"></script>
+<style>html,body{margin:0;padding:0;background:#060a18;overflow:hidden}</style>
+</head><body><div id="out" style="display:none"></div>
+<script>
+// Motion vocabulary test (6s): arc flight, calm spring, stagger, moonEase.
+// ?probe=1 runs a determinism probe instead of the scene.
+const W = 1280, H = 720, DUR = 6;
+const PROBE = location.search.includes("probe");
+let tl;
+const pippa = { x: 150, y: 550, tilt: 0 };
+const starS = { y: 120 };
+const stars = [];
+const flies = [];
+for (let i = 0; i < 12; i++) stars.push({ x: 80 + i * 100 + (i % 3) * 30, y: 60 + (i * 53) % 200, tw: 0.5, r: 2 + (i % 3) });
+for (let i = 0; i < 6; i++) flies.push({ x: 300 + i * 130, y: 640, a: 0 });
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  motionInit();
+  tl = gsap.timeline({ paused: true });
+  // 1. Pippa's ARC FLIGHT (not a straight line): waypoints curve through the sky
+  tl.to(pippa, Object.assign(motionArc(
+    [{ x: 150, y: 550 }, { x: 420, y: 360 }, { x: 720, y: 430 }, { x: 1050, y: 220 }], 1.6),
+    { duration: 4.5, ease: "moonEase" }), 0);
+  tl.to(pippa, { tilt: 0.18, duration: 1.2, ease: "moonEase" }, 0);
+  tl.to(pippa, { tilt: -0.1, duration: 2.1, ease: "moonEase" }, 1.2);
+  tl.to(pippa, { tilt: 0, duration: 1.2, ease: "moonEase" }, 3.3);
+  // 2. stars twinkle in sequence (stagger)
+  tl.to(stars, { tw: 1, duration: 1.1, ease: "moonEase", stagger: moonStaggerEach(0.12), yoyo: true, repeat: 1 }, 0.5);
+  // 3. a star settles with a calm spring (no bounce, bedtime-safe)
+  tl.to(starS, { y: 166, duration: 1.2, ease: springSettle() }, 3.8);
+  // 4. fireflies rise in sequence
+  tl.to(flies, { y: "-=130", a: 1, duration: 2.4, ease: "moonRise", stagger: moonStaggerEach(0.2) }, 1.0);
+
+  window.__seek = (t) => { tl.seek(t); if (!PROBE) draw(t); window.__frameReady = true; };
+  if (PROBE) {
+    const rec = [];
+    for (const t of [0, 1, 2, 3, 4, 5, 5.99]) {
+      tl.seek(t);
+      rec.push({ t, px: +pippa.x.toFixed(4), py: +pippa.y.toFixed(4), sy: +starS.y.toFixed(4), fy: +flies[0].y.toFixed(4), fa: +flies[0].a.toFixed(4) });
+    }
+    document.getElementById("out").textContent = JSON.stringify(rec);
+    window.__done = true;
+  }
+  window.__frameReady = true;
+  noLoop(); // seek-driven: p5 must never auto-draw (would pass t=undefined)
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return; // ignore p5 auto-draws
+  resetMatrix(); // every frame starts from identity; a single throw between
+                 // push/pop would otherwise corrupt all later frames
+  background(4, 6, 15);
+  // sky gradient
+  const ctx = drawingContext;
+  const gr = ctx.createLinearGradient(0, 0, 0, H);
+  gr.addColorStop(0, "#04060f"); gr.addColorStop(1, "#101a3d");
+  ctx.fillStyle = gr; ctx.fillRect(0, 0, W, H);
+  // stars
+  noStroke();
+  for (const s of stars) { fill(255, 255, 255, 90 + s.tw * 165); circle(s.x, s.y, s.r * 2); }
+  // moon (simple, breathing with moonEase-driven scale)
+  const br = 1 + 0.02 * Math.sin((tl.time() / DUR) * Math.PI * 2);
+  push(); translate(1050, 130); scale(br);
+  castRadialGlow(this, 0, 0, 200, [255, 238, 196], 0.25);
+  fill(255, 243, 214); circle(0, 0, 150);
+  fill(230, 210, 170); circle(-20, -10, 22); circle(15, 25, 15);
+  pop();
+  // settling star with glow
+  castRadialGlow(this, 960, starS.y, 60, [255, 240, 180], 0.5);
+  fill(255, 246, 200); circle(960, starS.y, 14);
+  // fireflies
+  for (const f of flies) {
+    castRadialGlow(this, f.x, f.y, 26 * f.a + 4, [255, 214, 130], 0.5 * f.a);
+    fill(255, 220, 150, 220 * f.a); circle(f.x, f.y, 6);
+  }
+  // Pippa on her arc
+  drawPippa(this, pippa.x, pippa.y, 1.0, t, { glow: 1.0, tilt: pippa.tilt });
+}
+</script>
+</body></html>
