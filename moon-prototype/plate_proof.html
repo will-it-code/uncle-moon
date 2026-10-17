@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/scenery.js"></script>
+<script src="cast/pippa.js"></script>
+<script src="cast/bird.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #wind{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="wind" width="1280" height="720"></canvas>
+<script>
+// Proof v2 — the LIVING plate: the AI painting breathes through a wind
+// shader (grass sways, leaves rustle, clouds drift), with code-drawn
+// foreground grass, Pippa, Bibi and fireflies on top. Pure f(t).
+const W = 1280, H = 720;
+let gl, uTimeLoc, uTexLoc, tl;
+const S = { pippaY: 0, blink: 1 };
+
+const FRAG = `
+precision highp float;
+uniform sampler2D uTex;
+uniform vec2 uRes;
+uniform float uTime;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453123); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1.0,0.0)), u.x),
+             mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int i=0;i<4;i++){ v += a*noise(p); p = p*2.03 + vec2(17.3,9.1); a *= 0.5; }
+  return v;
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  float t = uTime;
+
+  // slow camera push, done in-shader (deterministic)
+  float zoom = 1.0 + 0.05 * (t / 6.0);
+  vec2 zuv = (uv - vec2(0.5, 0.55)) / zoom + vec2(0.5, 0.55);
+
+  // wind masks (uv.y=0 is the bottom of the frame)
+  float grassM = 1.0 - smoothstep(0.22, 0.45, zuv.y);   // painted grass
+  float treeM  = smoothstep(0.30, 0.50, zuv.y)
+               * (1.0 - smoothstep(0.62, 0.85, zuv.y)); // mid band (tree)
+  float skyM   = smoothstep(0.58, 0.88, zuv.y);          // clouds
+
+  // turbulent wind field, two scales
+  vec2 w1 = vec2(fbm(zuv*4.0 + vec2(t*0.35, 0.0)),
+                 fbm(zuv*4.0 + vec2(3.7, t*0.28))) - 0.5;
+  vec2 w2 = vec2(fbm(zuv*8.0 + vec2(-t*0.22, 1.3)),
+                 fbm(zuv*8.0 + vec2(8.1, -t*0.19))) - 0.5;
+
+  vec2 off = w1 * 0.016 * grassM;      // grass sways
+  off += w2 * 0.009 * treeM;            // leaves rustle
+  off.x += skyM * sin(t*0.12 + zuv.y*4.0) * 0.007;   // clouds breathe
+  off.y += skyM * cos(t*0.09 + zuv.x*3.0) * 0.004;
+
+  vec3 col = texture2D(uTex, clamp(zuv + off, 0.001, 0.999)).rgb;
+  gl_FragColor = vec4(col, 1.0);
+}`;
+const VERT = `attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+function initGL(texImg) {
+  const cv = document.getElementById('wind');
+  gl = cv.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  function sh(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(pr); gl.useProgram(pr);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(gl.getUniformLocation(pr, 'uRes'), W, H);
+  uTimeLoc = gl.getUniformLocation(pr, 'uTime');
+  uTexLoc = gl.getUniformLocation(pr, 'uTex');
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, texImg);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.uniform1i(uTexLoc, 0);
+  gl.viewport(0, 0, W, H);
+}
+
+const flies = [];
+{
+  const rnd = castMulberry32(11);
+  for (let i = 0; i < 7; i++) {
+    flies.push({ x: 150 + rnd() * 980, y: 400 + rnd() * 200,
+                 ph: rnd() * 6.28, r: 20 + rnd() * 14 });
+  }
+}
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  const img = new Image();
+  img.onload = () => {
+    initGL(img);
+    tl = gsap.timeline({ paused: true });
+    tl.to(S, { pippaY: -26, duration: 3, ease: "sine.inOut", yoyo: true, repeat: 1 }, 0);
+    window.__seek = (t) => {
+      tl.seek(t);
+      gl.uniform1f(uTimeLoc, t);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      draw(t);
+      window.__frameReady = true;
+    };
+    window.__frameReady = true;
+  };
+  img.src = "../../your_files/kids-demo/media-generation-ai-meadow-plate-0-f18ec549-071e-45db-b54d-a680c53ec30b.webp";
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  const ctx = drawingContext;
+  const pippaFace = Object.assign({}, PIPPA_EXPRESSIONS.happy);
+
+  for (const f of flies) {
+    const fx = f.x + 24 * Math.sin(t * 0.5 + f.ph);
+    const fy = f.y + 15 * Math.sin(t * 0.75 + f.ph * 2.0);
+    const tw = 0.55 + 0.45 * Math.sin(t * 1.8 + f.ph * 3.0);
+    castRadialGlow(this, fx, fy, f.r * tw, [255, 214, 130], 0.5 * tw);
+    ctx.fillStyle = `rgba(255,226,160,${0.9 * tw})`;
+    ctx.beginPath(); ctx.arc(fx, fy, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  drawPippa(this, 430, 400 + S.pippaY, 1.6, t,
+    { blink: S.blink, expression: pippaFace, glow: 1 });
+  drawBird(this, 965, 615, 1.45, t, { blink: S.blink });
+
+  // real foreground grass: dark blades swaying over the painting's edge
+  drawGrassField(this, t, 301, 748, 48, 60, 120, 1);
+  drawNightFlowers(this, t, 302, 10, 730);
+}
+</script>
+</body></html>

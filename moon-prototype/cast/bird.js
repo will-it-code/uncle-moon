@@ -19,10 +19,10 @@
  */
 "use strict";
 
-const BIRD_BODY   = [255, 150, 75];    // vivid tangerine
-const BIRD_BELLY  = [255, 215, 135];   // sunny yellow
-const BIRD_WING   = [55, 200, 195];    // bright teal
-const BIRD_BEAK   = [255, 190, 80];    // golden
+const BIRD_BODY   = [238, 168, 128];   // soft apricot (house palette)
+const BIRD_BELLY  = [248, 232, 208];   // cream
+const BIRD_WING   = [95, 175, 170];    // dusty teal
+const BIRD_BEAK   = [240, 180, 100];   // soft gold
 const BIRD_INK    = [90, 60, 40];
 
 function drawBird(p, x, y, scale, t, state) {
@@ -43,7 +43,7 @@ function drawBird(p, x, y, scale, t, state) {
   ctx.restore();
 
   // tiny feet
-  p.noStroke(); p.fill(240, 130, 60);
+  p.noStroke(); p.fill(215, 140, 100);
   p.ellipse(-12, 30, 14, 9);
   p.ellipse(12, 30, 14, 9);
 
@@ -54,8 +54,8 @@ function drawBird(p, x, y, scale, t, state) {
     p.translate(s * 27, 4);
     p.rotate(s * (0.5 + sway));
     const wg = ctx.createLinearGradient(0, -12, 0, 12);
-    wg.addColorStop(0, "rgb(90,220,215)");
-    wg.addColorStop(1, "rgb(40,170,165)");
+    wg.addColorStop(0, "rgb(120,190,185)");
+    wg.addColorStop(1, "rgb(70,150,145)");
     ctx.fillStyle = wg;
     ctx.beginPath(); ctx.ellipse(s * 8, 0, 15, 24, 0, 0, Math.PI * 2); ctx.fill();
     p.pop();
@@ -63,27 +63,27 @@ function drawBird(p, x, y, scale, t, state) {
 
   // round fluffy body, lit from the upper-left
   const bg = ctx.createRadialGradient(-10, -12, 5, 0, 0, 34);
-  bg.addColorStop(0, "rgb(255,175,105)");
+  bg.addColorStop(0, "rgb(250,195,160)");
   bg.addColorStop(0.6, `rgb(${BIRD_BODY[0]},${BIRD_BODY[1]},${BIRD_BODY[2]})`);
-  bg.addColorStop(1, "rgb(225,105,45)");
+  bg.addColorStop(1, "rgb(210,130,95)");
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
 
   // sunny belly
   const belly = ctx.createRadialGradient(0, 8, 2, 0, 12, 22);
-  belly.addColorStop(0, "rgba(255,225,150,0.95)");
-  belly.addColorStop(1, "rgba(255,205,120,0)");
+  belly.addColorStop(0, "rgba(250,238,215,0.95)");
+  belly.addColorStop(1, "rgba(245,225,195,0)");
   ctx.fillStyle = belly;
   ctx.beginPath(); ctx.ellipse(0, 12, 20, 15, 0, 0, Math.PI * 2); ctx.fill();
 
   // whisper of warm rim light, upper-left
-  p.noFill(); p.stroke(255, 220, 160, 80); p.strokeWeight(2.5);
+  p.noFill(); p.stroke(250, 235, 210, 70); p.strokeWeight(2.5);
   p.arc(0, 0, 57, 57, Math.PI * 1.05, Math.PI * 1.45); p.noStroke();
 
   // head tuft: three little feathers
   p.noStroke();
   const tg = ctx.createLinearGradient(0, -48, 0, -28);
-  tg.addColorStop(0, "rgb(255,215,135)"); tg.addColorStop(1, "rgb(255,150,75)");
+  tg.addColorStop(0, "rgb(248,215,160)"); tg.addColorStop(1, "rgb(238,168,128)");
   ctx.fillStyle = tg;
   for (const [tx, tr] of [[-10, -0.25], [0, 0], [10, 0.25]]) {
     p.push(); p.translate(tx, -28); p.rotate(tr);
@@ -110,7 +110,7 @@ function drawBird(p, x, y, scale, t, state) {
 
   // tiny golden beak (his mouth)
   const bkg = ctx.createLinearGradient(0, -2, 0, 10);
-  bkg.addColorStop(0, "rgb(255,205,100)"); bkg.addColorStop(1, "rgb(240,160,60)");
+  bkg.addColorStop(0, "rgb(245,195,120)"); bkg.addColorStop(1, "rgb(225,160,95)");
   ctx.fillStyle = bkg;
   ctx.beginPath();
   ctx.moveTo(-8, 2); ctx.lineTo(8, 2); ctx.lineTo(0, 12); ctx.closePath(); ctx.fill();
