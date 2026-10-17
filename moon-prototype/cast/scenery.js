@@ -8,6 +8,87 @@
  */
 "use strict";
 
+/* ------------------------------------------- detailed painterly tree */
+const _leafCache = {};
+function drawTreeDetailed(p, x, y, scale, t, state) {
+  state = Object.assign({ swayAmp: 1 }, state || {});
+  const ctx = p.drawingContext;
+  const sway = Math.sin(t * 0.5) * 0.010 * state.swayAmp;
+
+  // seeded leaf field, built once
+  if (!_leafCache.leaves) {
+    const rnd = castMulberry32(4242);
+    const leaves = [];
+    // canopy = union of blobs; scatter dabs inside them
+    const blobs = [[-48,-165,58],[0,-190,68],[52,-162,56],[-22,-138,48],[30,-136,46],[0,-160,80]];
+    for (const [bx, by, br] of blobs) {
+      const n = Math.floor(br * 2.6);
+      for (let i = 0; i < n; i++) {
+        const a = rnd() * Math.PI * 2, rr = Math.sqrt(rnd()) * br;
+        const lx = bx + Math.cos(a) * rr, ly = by + Math.sin(a) * rr * 0.92;
+        // light: moonlit on upper-left, deep in the core
+        const li = Math.max(0, Math.min(1,
+          0.5 - (lx / 160) * 0.5 - ((ly + 165) / 130) * 0.55 + (rnd() - 0.5) * 0.35));
+        leaves.push({ x: lx, y: ly, r: 11 + rnd() * 13, rot: rnd() * 3.14,
+                      li, wob: rnd() * 6.28 });
+      }
+    }
+    _leafCache.leaves = leaves;
+  }
+
+  p.push();
+  p.translate(x, y);
+  p.scale(scale, scale);
+  p.rotate(sway);
+
+  // trunk: tapered, gently curved, bark shading
+  const tg = ctx.createLinearGradient(-16, 0, 16, 0);
+  tg.addColorStop(0, "rgb(30,26,52)");
+  tg.addColorStop(0.45, "rgb(58,50,88)");
+  tg.addColorStop(1, "rgb(32,28,54)");
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.moveTo(-17, 0);
+  ctx.quadraticCurveTo(-12, -75, 5, -128);
+  ctx.lineTo(19, -128);
+  ctx.quadraticCurveTo(4, -75, 17, 0);
+  ctx.closePath(); ctx.fill();
+  // branches reaching into the canopy
+  ctx.strokeStyle = "rgb(48,42,76)"; ctx.lineCap = "round";
+  const branches = [
+    [4,-95,-34,-118,-58,-148,9],[8,-105,36,-124,56,-154,7],
+    [6,-115,-8,-140,-16,-168,6],[7,-110,22,-132,34,-166,6],
+  ];
+  for (const [x0,y0,x1,y1,x2,y2,w] of branches) {
+    ctx.lineWidth = w;
+    ctx.beginPath(); ctx.moveTo(x0,y0); ctx.quadraticCurveTo(x1,y1,x2,y2); ctx.stroke();
+  }
+
+  // soft dark base masses first (foliage body)
+  const baseBlobs = [[-48,-165,58],[0,-190,68],[52,-162,56],[-22,-138,48],[30,-136,46],[0,-160,80]];
+  for (const [bx, by, br] of baseBlobs) {
+    const g = ctx.createRadialGradient(bx - br*0.3, by - br*0.35, br*0.2, bx, by, br);
+    g.addColorStop(0, "rgb(44,86,92)");
+    g.addColorStop(1, "rgb(22,48,62)");
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // leaf masses: deep teal cores flowing into moonlit upper-left edges
+  for (const L of _leafCache.leaves) {
+    const wob = 1.5 * Math.sin(t * 0.8 + L.wob);
+    const lit = Math.pow(L.li, 2.6);   // only the rim truly glows
+    const r = 28 + lit * 150;
+    const g = 58 + lit * 115;
+    const b = 72 + lit * 95;
+    ctx.fillStyle = `rgb(${r|0},${g|0},${b|0})`;
+    ctx.beginPath();
+    ctx.ellipse(L.x + wob, L.y, L.r, L.r * 0.78, L.rot, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  p.pop();
+}
+
 /* ------------------------------------------------------------------ tree */
 function drawTree(p, x, y, scale, t, state) {
   state = Object.assign({ swayAmp: 1 }, state || {});
