@@ -171,6 +171,9 @@ function drawUncleMoon(p, x, y, scale, t, state) {
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
   grainOver(ctx, cx, cy, R, R, 0.05); // hand-painted tooth (whisper)
+  // soft hand-drawn outline, whisper-thin (warm dark brown, never black)
+  ctx.strokeStyle = "rgba(70,55,45,0.5)"; ctx.lineWidth = 2; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
 
   // render-stack passes, clipped to the disc
   ctx.save();

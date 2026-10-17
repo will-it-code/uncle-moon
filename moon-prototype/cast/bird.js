@@ -58,6 +58,8 @@ function drawBird(p, x, y, scale, t, state) {
     wg.addColorStop(1, "rgb(70,150,145)");
     ctx.fillStyle = wg;
     ctx.beginPath(); ctx.ellipse(s * 8, 0, 15, 24, 0, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = "rgba(70,55,45,0.7)"; ctx.lineWidth = 2; ctx.lineJoin = "round";
+    ctx.beginPath(); ctx.ellipse(s * 8, 0, 15, 24, 0, 0, Math.PI * 2); ctx.stroke();
     p.pop();
   }
 
@@ -69,6 +71,9 @@ function drawBird(p, x, y, scale, t, state) {
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
   grainOver(ctx, 0, 0, 30, 30, 0.08); // hand-painted tooth
+  // soft hand-drawn outline (warm dark brown, never black)
+  ctx.strokeStyle = "rgba(70,55,45,0.85)"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.stroke();
 
   // sunny belly
   const belly = ctx.createRadialGradient(0, 8, 2, 0, 12, 22);

@@ -84,6 +84,9 @@ function drawPippa(p, x, y, scale, t, state) {
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
   grainOver(ctx, 0, 0, 26, 26, 0.08); // hand-painted tooth
+  // soft hand-drawn outline (warm dark brown, never black)
+  ctx.strokeStyle = "rgba(70,55,45,0.85)"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.stroke();
 
   // whisper of warm rim light, upper-left (echoes the moon's rim)
   p.noFill(); p.stroke(255, 226, 160, 70); p.strokeWeight(2.5);

@@ -92,6 +92,9 @@ function drawTurtle(p, x, y, scale, t, state) {
   ctx.fillStyle = shg;
   ctx.beginPath(); ctx.arc(0, 5, 55, Math.PI, 0); ctx.closePath(); ctx.fill();
   grainOver(ctx, 0, 5, 55, 55, 0.08); // hand-painted tooth (shell + head)
+  // soft hand-drawn outline on the shell dome (warm dark brown, never black)
+  ctx.strokeStyle = "rgba(70,55,45,0.85)"; ctx.lineWidth = 2.5; ctx.lineJoin = "round";
+  ctx.beginPath(); ctx.arc(0, 5, 55, Math.PI, 0); ctx.stroke();
 
   // golden rim along the shell's base
   p.noFill(); p.stroke(TURTLE_RIM[0], TURTLE_RIM[1], TURTLE_RIM[2]); p.strokeWeight(7);
