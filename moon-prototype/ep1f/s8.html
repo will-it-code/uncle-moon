@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="../vendor/p5.min.js"></script>
+<script src="../vendor/gsap.min.js"></script>
+<script src="../cast/common.js"></script>
+<script src="../cast/painterly.js"></script>
+<script src="../cast/uncle-moon.js"></script>
+<script src="../cast/pippa.js"></script>
+<script src="../cast/scenery.js"></script>
+<script src="bg.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Ep1F S8_RITUAL (30s): the viewer anchor. Moon watches, meadow sleeps.
+const W = 1280, H = 720, DUR = 30;
+let tl;
+const S = { breath: 0, blink: 1, pippaGlow: 1.4 };
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initBG('sky');
+  tl = gsap.timeline({ paused: true });
+  tl.to(S, { breath: 1, duration: DUR, ease: "sine.inOut" }, 0);
+  tl.to(S, { pippaGlow: 1.0, duration: DUR, ease: "sine.inOut" }, 0); // settling
+  for (const bt of [8, 21]) {
+    tl.to(S, { blink: 0.15, duration: 0.12 }, bt);
+    tl.to(S, { blink: 1, duration: 0.18 }, bt + 0.12);
+  }
+  window.__seek = (t) => {
+    tl.seek(t);
+    paintBG(t);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  // sleeping meadow silhouette along the bottom
+  const ctx = drawingContext;
+  ctx.fillStyle = "rgb(10,18,30)";
+  ctx.beginPath();
+  ctx.moveTo(0, 720);
+  for (let x = 0; x <= W; x += 32) {
+    ctx.lineTo(x, 640 + 18 * Math.sin(x * 0.008 + 2.0));
+  }
+  ctx.lineTo(W, 720); ctx.closePath(); ctx.fill();
+  drawTreeDetailed(this, 180, 700, 1.0, t, {});
+  drawUncleMoon(this, 880, 330, 1.0, t,
+    { breath: S.breath, blink: S.blink, expression: "gentle" });
+  // Pippa glowing softly below, keeping watch with him
+  const face = Object.assign({}, PIPPA_EXPRESSIONS.sleepy);
+  drawPippa(this, 420, 560 + 8 * Math.sin(t * 0.8), 1.3, t,
+    { blink: S.blink, expression: face, glow: S.pippaGlow });
+}
+</script>
+</body></html>

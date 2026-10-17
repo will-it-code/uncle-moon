@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="../vendor/p5.min.js"></script>
+<script src="../vendor/gsap.min.js"></script>
+<script src="../cast/common.js"></script>
+<script src="../cast/painterly.js"></script>
+<script src="../cast/uncle-moon.js"></script>
+<script src="../cast/pippa.js"></script>
+<script src="../cast/scenery.js"></script>
+<script src="bg.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Ep1F S6_DIM (25s): Pippa rises high, glows with all her might, fades.
+const W = 1280, H = 720, DUR = 25;
+let tl;
+const S = { py: 600, glow: 0.55, blink: 1 };
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initBG('meadow');
+  tl = gsap.timeline({ paused: true });
+  tl.to(S, { py: 330, duration: 10, ease: "sine.inOut" }, 0);   // rises
+  tl.to(S, { glow: 1.2, duration: 6, ease: "sine.in" }, 2);     // tries hard
+  tl.to(S, { glow: 0.08, duration: 12, ease: "sine.out" }, 9);  // fades
+  tl.to(S, { py: 600, duration: 8, ease: "sine.inOut" }, 15);   // sinks
+  for (const bt of [5, 20]) {
+    tl.to(S, { blink: 0.15, duration: 0.12 }, bt);
+    tl.to(S, { blink: 1, duration: 0.18 }, bt + 0.12);
+  }
+  window.__seek = (t) => {
+    tl.seek(t);
+    paintBG(t);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  drawCastle(this, 330, 472, 0.9, t, {});
+  drawTreeDetailed(this, 1075, 640, 1.2, t, {});
+  drawUncleMoon(this, 180, 150, 0.45, t,
+    { breath: 0, blink: S.blink, expression: "gentle" });
+  // her glow sputters as it dies
+  const sputter = S.glow > 0.2 ? 0.9 + 0.1 * Math.sin(t * 9.0) : 1;
+  const face = Object.assign({}, PIPPA_EXPRESSIONS.sleepy);
+  drawPippa(this, 640, S.py, 1.5, t,
+    { blink: S.blink, expression: face, glow: Math.max(0.05, S.glow * sputter) });
+  drawGrassField(this, t, 201, 745, 55, 60, 110, 1);
+  drawNightFlowers(this, t, 202, 12, 725);
+}
+</script>
+</body></html>

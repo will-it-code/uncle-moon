@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="../vendor/p5.min.js"></script>
+<script src="../vendor/gsap.min.js"></script>
+<script src="../cast/common.js"></script>
+<script src="../cast/painterly.js"></script>
+<script src="../cast/uncle-moon.js"></script>
+<script src="../cast/pippa.js"></script>
+<script src="../cast/bird.js"></script>
+<script src="../cast/turtle.js"></script>
+<script src="../cast/scenery.js"></script>
+<script src="bg.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Ep1F S7_GLOWBACK (45s): friends gather, share glow, Pippa shines brighter.
+const W = 1280, H = 720, DUR = 45;
+let tl;
+const S = { glow: 0.1, bibiX: 100, tommyX: 1180, blink: 1, orbs: 0 };
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initBG('meadow');
+  tl = gsap.timeline({ paused: true });
+  tl.to(S, { bibiX: 480, duration: 12, ease: "sine.inOut" }, 2);   // Bibi flies in
+  tl.to(S, { tommyX: 800, duration: 16, ease: "sine.inOut" }, 4);  // Tommy lumbers in
+  tl.to(S, { orbs: 1, duration: 8, ease: "sine.inOut" }, 12);      // glow flows
+  tl.to(S, { glow: 1.6, duration: 15, ease: "sine.inOut" }, 14);   // brighter!
+  for (const bt of [10, 28, 40]) {
+    tl.to(S, { blink: 0.15, duration: 0.12 }, bt);
+    tl.to(S, { blink: 1, duration: 0.18 }, bt + 0.12);
+  }
+  window.__seek = (t) => {
+    tl.seek(t);
+    paintBG(t);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  const ctx = drawingContext;
+  drawCastle(this, 330, 472, 0.9, t, {});
+  drawTreeDetailed(this, 1075, 640, 1.2, t, {});
+  drawUncleMoon(this, 1080, 140, 0.45, t,
+    { breath: 0, blink: S.blink, expression: "gentle" });
+  drawBird(this, S.bibiX, 480 + 10 * Math.sin(t * 1.2), 1.4, t, { blink: S.blink });
+  drawTurtle(this, S.tommyX, 640, 1.3, t, { blink: S.blink });
+  // little orbs of shared glow drifting toward Pippa
+  if (S.orbs > 0) {
+    for (let i = 0; i < 6; i++) {
+      const ph = i / 6 * Math.PI * 2;
+      const ox = 640 + 180 * Math.cos(ph + t * 0.5) * (1 - S.orbs * 0.7);
+      const oy = 520 + 120 * Math.sin(ph + t * 0.5) * (1 - S.orbs * 0.7);
+      const tw = 0.5 + 0.5 * Math.sin(t * 3 + i * 1.7);
+      castRadialGlow(this, ox, oy, 26 * tw * S.orbs, [255, 214, 130], 0.55 * S.orbs * tw);
+    }
+  }
+  const face = Object.assign({}, PIPPA_EXPRESSIONS.happy);
+  drawPippa(this, 640, 520, 1.6, t,
+    { blink: S.blink, expression: face, glow: S.glow });
+  drawGrassField(this, t, 201, 745, 55, 60, 110, 1);
+  drawNightFlowers(this, t, 202, 12, 725);
+}
+</script>
+</body></html>

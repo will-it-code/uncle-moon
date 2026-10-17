@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="../vendor/p5.min.js"></script>
+<script src="../vendor/gsap.min.js"></script>
+<script src="../cast/common.js"></script>
+<script src="../cast/painterly.js"></script>
+<script src="../cast/uncle-moon.js"></script>
+<script src="bg.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Ep1F S9_TEASE (30s): Moon Lake. A silver tail slips under the water.
+const W = 1280, H = 720, DUR = 30;
+let tl;
+const S = { breath: 0, blink: 1, tail: 0 };
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initBG('pond');
+  tl = gsap.timeline({ paused: true });
+  tl.to(S, { breath: 1, duration: DUR, ease: "sine.inOut" }, 0);
+  // the tail arcs up at 18s, slips under by 24s
+  tl.to(S, { tail: 1, duration: 3, ease: "sine.inOut" }, 17);
+  tl.to(S, { tail: 0, duration: 3, ease: "sine.inOut" }, 21);
+  for (const bt of [7, 27]) {
+    tl.to(S, { blink: 0.15, duration: 0.12 }, bt);
+    tl.to(S, { blink: 1, duration: 0.18 }, bt + 0.12);
+  }
+  window.__seek = (t) => {
+    tl.seek(t);
+    paintBG(t);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  const ctx = drawingContext;
+  drawUncleMoon(this, 1050, 220, 0.7, t,
+    { breath: S.breath, blink: S.blink, expression: "gentle" });
+  // silver tail: arcs out of the water, then slips under
+  if (S.tail > 0.02) {
+    const tx = 640, ty = 560;
+    const h = 120 * S.tail;
+    const g = ctx.createLinearGradient(tx, ty, tx, ty - h);
+    g.addColorStop(0, `rgba(200,220,240,${0.9 * S.tail})`);
+    g.addColorStop(1, `rgba(230,240,250,${0.2 * S.tail})`);
+    ctx.strokeStyle = g; ctx.lineWidth = 14; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(tx - 60, ty);
+    ctx.quadraticCurveTo(tx, ty - h * 1.4, tx + 60, ty - h * 0.4);
+    ctx.stroke();
+    // ripple rings where it slipped
+    ctx.strokeStyle = `rgba(180,200,230,${0.5 * (1 - S.tail) + 0.1})`;
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 3; i++) {
+      ctx.beginPath();
+      ctx.ellipse(tx, ty + 6, (30 + i * 26) * (1.2 - S.tail * 0.5), 8, 0, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+</script>
+</body></html>

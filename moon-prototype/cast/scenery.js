@@ -250,3 +250,98 @@ function drawNightFlowers(p, t, seed, n, yBase) {
     ctx.beginPath(); ctx.arc(fx, fy, f.r * 0.55, 0, Math.PI * 2); ctx.fill();
   }
 }
+
+/* drawStoryTree(p, x, y, s, t, o): a tree DESIGNED for scenes where
+ * something sits on it (nest, character, lantern). Clear trunk, one
+ * strong branch for the payload, canopy held high and clear of it.
+ * Returns { bx, by } — the branch-tip point (in canvas px) where the
+ * nest/perch belongs. Nandan, Oct 16 2026. */
+function drawStoryTree(p, x, y, s, t, o) {
+  const ctx = p.drawingContext;
+  const sway = Math.sin(t * 0.45) * 0.008;
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(s, s); ctx.rotate(sway);
+
+  // trunk: tapered, gentle S-curve
+  const tg = ctx.createLinearGradient(-30, 0, 30, 0);
+  tg.addColorStop(0, "rgb(66,45,34)");
+  tg.addColorStop(0.5, "rgb(102,72,52)");
+  tg.addColorStop(1, "rgb(66,45,34)");
+  ctx.fillStyle = tg;
+  ctx.beginPath();
+  ctx.moveTo(-30, 0);
+  ctx.quadraticCurveTo(-26, -150, -15, -280);
+  ctx.lineTo(15, -280);
+  ctx.quadraticCurveTo(26, -150, 30, 0);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(70,55,45,0.9)"; ctx.lineWidth = 3; ctx.lineJoin = "round";
+  ctx.stroke();
+  grainOver(ctx, 0, -140, 32, 150, 0.09);
+
+  // THE branch: thick, rising gently right — built to hold a nest
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgb(84,58,42)"; ctx.lineWidth = 24;
+  ctx.beginPath();
+  ctx.moveTo(0, -215);
+  ctx.quadraticCurveTo(100, -228, 205, -192);
+  ctx.stroke();
+  ctx.strokeStyle = "rgb(108,78,56)"; ctx.lineWidth = 10;
+  ctx.beginPath();
+  ctx.moveTo(8, -220);
+  ctx.quadraticCurveTo(100, -231, 195, -196);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(70,55,45,0.9)"; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(0, -215);
+  ctx.quadraticCurveTo(100, -228, 205, -192);
+  ctx.stroke();
+
+  // upper limbs: reach from the trunk top INTO the canopy (no floating)
+  ctx.lineCap = "round";
+  ctx.strokeStyle = "rgb(84,58,42)"; ctx.lineWidth = 14;
+  for (const [dx, dy] of [[-70, -110], [60, -120], [0, -140]]) {
+    ctx.beginPath();
+    ctx.moveTo(0, -265);
+    ctx.quadraticCurveTo(dx * 0.5, -265 + dy * 0.6, dx, -265 + dy);
+    ctx.stroke();
+  }
+
+  // canopy: soft puffs anchored ON the trunk top, rising from it
+  const rnd = castMulberry32(31);
+  const cols = [[88,142,130],[72,122,112],[102,162,146],[80,132,120]];
+  // crown ring: puffs touching the trunk top first (the anchor)
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2;
+    const lx = Math.cos(a) * 55, ly = -295 - Math.abs(Math.sin(a)) * 25;
+    const lr = 34 + rnd() * 14;
+    const c = cols[(rnd() * cols.length)|0];
+    const g = ctx.createRadialGradient(lx - lr*0.3, ly - lr*0.3, lr*0.1, lx, ly, lr);
+    g.addColorStop(0, `rgb(${c[0]+18},${c[1]+18},${c[2]+14})`);
+    g.addColorStop(0.6, `rgb(${c[0]},${c[1]},${c[2]})`);
+    g.addColorStop(1, `rgb(${c[0]-22},${c[1]-20},${c[2]-16})`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.fill();
+  }
+  // upper canopy rising from the crown
+  for (let i = 0; i < 24; i++) {
+    const lx = (rnd() - 0.5) * 300;
+    const ly = -330 - rnd() * 130 - Math.abs(lx) * 0.15;
+    const lr = 30 + rnd() * 26;
+    const c = cols[(rnd() * cols.length)|0];
+    const g = ctx.createRadialGradient(lx - lr*0.3, ly - lr*0.3, lr*0.1, lx, ly, lr);
+    g.addColorStop(0, `rgb(${c[0]+18},${c[1]+18},${c[2]+14})`);
+    g.addColorStop(0.6, `rgb(${c[0]},${c[1]},${c[2]})`);
+    g.addColorStop(1, `rgb(${c[0]-22},${c[1]-20},${c[2]-16})`);
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(lx, ly, lr, 0, Math.PI * 2); ctx.fill();
+  }
+  // moonlit rim across the canopy top
+  ctx.strokeStyle = "rgba(210,230,255,0.35)"; ctx.lineWidth = 3;
+  for (let i = 0; i < 8; i++) {
+    const lx = (rnd() - 0.5) * 260;
+    const ly = -380 - rnd() * 100;
+    ctx.beginPath(); ctx.arc(lx, ly, 34 + rnd() * 20, Math.PI * 1.1, Math.PI * 1.6); ctx.stroke();
+  }
+  ctx.restore();
+  return { bx: x + 205 * s, by: y - 192 * s };
+}
