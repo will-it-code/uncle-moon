@@ -38,9 +38,9 @@ const MOON_BUF = { w: 400, h: 520, cx: 200, cy: 310 };
 
 /* Expression presets — all bedtime-calm. Angles in units of PI. */
 const MOON_EXPRESSIONS = {
-  sleepy: { eyeA0: 0.15, eyeA1: 0.85, eyeW: 48, smileW: 88, smileH: 64, smileY: 28, cheek: 0.50 },
-  happy:  { eyeA0: 1.15, eyeA1: 1.85, eyeW: 54, smileW: 114, smileH: 86, smileY: 20, cheek: 0.85 },
-  gentle: { eyeA0: 0.18, eyeA1: 0.82, eyeW: 44, smileW: 70, smileH: 48, smileY: 30, cheek: 0.35 },
+  sleepy: { eyeA0: 0.15, eyeA1: 0.85, eyeW: 48, smileW: 88, smileH: 64, smileY: 28 },
+  happy:  { eyeA0: 1.15, eyeA1: 1.85, eyeW: 54, smileW: 114, smileH: 86, smileY: 20 },
+  gentle: { eyeA0: 0.18, eyeA1: 0.82, eyeW: 44, smileW: 70, smileH: 48, smileY: 30 },
 };
 
 function moonExprParams(expr) {
@@ -81,54 +81,58 @@ function moonDrawFace(p, ctx, face, blink) {
   p.strokeWeight(10);
   p.arc(fx, fy + face.smileY, face.smileW, face.smileH, Math.PI * 0.12, Math.PI * 0.88);
   p.noStroke();
-  // blush scales with the expression's warmth
-  ctx.save(); ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = `rgba(240,150,140,${0.35 * face.cheek + 0.15})`;
-  for (const s of [-1, 1]) { ctx.beginPath(); ctx.ellipse(fx + s * 48, fy + 18, 16, 10, 0, 0, Math.PI * 2); ctx.fill(); }
-  ctx.restore();
+  // no blush (Nandan, Oct 16, 2026): the face stays completely clean.
 }
 
 function moonDrawNightcap(p, ctx, t, lag) {
-  // seated on the crescent's upper-left limb (clear of the transparent bite)
+  // Slim sleepy cap, flopped gently left along the crescent's upper limb.
+  // Base corners verified on the lit crescent, clear of the transparent bite.
   p.push();
-  p.translate(-60, -8);
-  p.rotate(0.004 * (lag.x - 5 * Math.sin((Math.PI * 2 * t) / 2.3 + 2.0)));
-  p.translate(60, 8);
+  p.translate(-62, -12);
+  p.rotate(-0.28 + 0.004 * (lag.x - 5 * Math.sin((Math.PI * 2 * t) / 2.3 + 2.0)));
 
-  const grad = ctx.createLinearGradient(0, -270, 0, -100);
+  const grad = ctx.createLinearGradient(0, -225, 0, -80);
   grad.addColorStop(0, "rgb(150,160,255)");
   grad.addColorStop(1, "rgb(92,102,220)");
   ctx.fillStyle = grad;
   ctx.beginPath();
-  ctx.moveTo(-85, -115);
-  ctx.quadraticCurveTo(-62, -200, 5, -265);
-  ctx.quadraticCurveTo(52, -212, 90, -105);
-  ctx.quadraticCurveTo(2, -92, -85, -115);
+  ctx.moveTo(-38, -95);
+  ctx.quadraticCurveTo(-30, -170, 5, -225);   // left edge up to the tip
+  ctx.quadraticCurveTo(32, -172, 37, -88);    // right edge back down
+  ctx.quadraticCurveTo(0, -78, -38, -95);      // base
   ctx.closePath(); ctx.fill();
+
   // fabric shading: multiply away from the key light + soft fold shadows
   ctx.save(); ctx.globalCompositeOperation = "multiply";
-  const sh = ctx.createLinearGradient(-85, 0, 90, 0);
+  const sh = ctx.createLinearGradient(-38, 0, 37, 0);
   sh.addColorStop(0, "rgba(255,255,255,0)"); sh.addColorStop(1, "rgba(60,70,140,0.40)");
   ctx.fillStyle = sh; ctx.fill();
   ctx.fillStyle = "rgba(70,80,160,0.26)";
-  ctx.beginPath(); ctx.ellipse(-30, -160, 16, 42, 0.35, 0, Math.PI * 2); ctx.fill();
-  ctx.beginPath(); ctx.ellipse(28, -140, 13, 34, 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-14, -140, 9, 28, 0.3, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(14, -125, 7, 22, 0.3, 0, Math.PI * 2); ctx.fill();
   ctx.restore();
 
-  p.noFill(); p.stroke(70, 78, 190, 90); p.strokeWeight(8); p.strokeCap(p.ROUND);
-  p.bezier(-32, -198, -8, -178, 12, -156, 30, -130);
+  // contact shadow under the base so the cap sits on the moon
+  ctx.save(); ctx.globalCompositeOperation = "multiply";
+  ctx.fillStyle = "rgba(90,80,140,0.30)";
+  ctx.beginPath(); ctx.ellipse(0, -86, 32, 8, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+
+  p.noFill(); p.stroke(70, 78, 190, 90); p.strokeWeight(6); p.strokeCap(p.ROUND);
+  p.bezier(-16, -170, -4, -152, 6, -136, 14, -118);
   p.noStroke();
 
-  const tx = 5, ty = -265;
+  // pompom on a short string from the tip, riding the spring lag
+  const tx = 5, ty = -225;
   const px = tx + lag.x, py = ty + lag.y;
   p.stroke(200, 205, 255, 160); p.strokeWeight(4);
   p.line(tx, ty, px, py);
   p.noStroke();
-  const pg = ctx.createRadialGradient(px - 6, py - 7, 2, px, py, 20);
+  const pg = ctx.createRadialGradient(px - 5, py - 6, 2, px, py, 16);
   pg.addColorStop(0, "rgb(255,255,255)");
   pg.addColorStop(1, "rgb(205,210,235)");
   ctx.fillStyle = pg;
-  ctx.beginPath(); ctx.arc(px, py, 19, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(px, py, 15, 0, Math.PI * 2); ctx.fill();
   p.pop();
 }
 
@@ -181,20 +185,7 @@ function drawUncleMoon(p, x, y, scale, t, state) {
   ctx.globalCompositeOperation = "source-over";
   ctx.restore();
 
-  // craters with true light-direction shading
-  for (const [ox, oy, cr] of [[-75, -55, 15], [-100, 55, 12], [-30, 90, 10]]) {
-    const px = cx + ox, py = cy + oy;
-    g = ctx.createRadialGradient(px - cr * 0.3, py - cr * 0.3, cr * 0.1, px, py, cr);
-    g.addColorStop(0, "rgb(232,201,143)"); g.addColorStop(0.8, "rgb(217,180,124)"); g.addColorStop(1, "rgb(201,160,104)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, cr, 0, Math.PI * 2); ctx.fill();
-    ctx.save(); ctx.globalCompositeOperation = "multiply";
-    g = ctx.createRadialGradient(px + cr * 0.4, py + cr * 0.4, cr * 0.05, px + cr * 0.4, py + cr * 0.4, cr * 0.9);
-    g.addColorStop(0, "rgba(110,80,110,0.42)"); g.addColorStop(1, "rgba(255,255,255,0)");
-    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(px, py, cr, 0, Math.PI * 2); ctx.fill();
-    ctx.restore();
-    b.noFill(); b.stroke(255, 252, 240, 100); b.strokeWeight(2.5);
-    b.arc(px, py, cr * 1.7, cr * 1.7, Math.PI * 1.05, Math.PI * 1.45); b.noStroke();
-  }
+  // NO craters (Nandan, Oct 16, 2026): the moon face stays clean and smooth.
 
   // THE BITE: punched transparent — the sky shows through, no black patch
   ctx.save(); ctx.globalCompositeOperation = "destination-out";
