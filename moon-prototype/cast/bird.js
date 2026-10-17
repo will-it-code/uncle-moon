@@ -25,8 +25,18 @@ const BIRD_WING   = [95, 175, 170];    // dusty teal
 const BIRD_BEAK   = [240, 180, 100];   // soft gold
 const BIRD_INK    = [90, 60, 40];
 
+// Expressions (Oct 17, 2026 — Nandan: crying must read). crying = sad + tears.
+const BIRD_EXPRESSIONS = {
+  happy:  { eyeScale: 1.0, beakOpen: 0.6, tears: false },
+  gentle: { eyeScale: 0.9, beakOpen: 0.0, tears: false },
+  sleepy: { eyeScale: 0.35, beakOpen: 0.0, tears: false },
+  sad:    { eyeScale: 0.7, beakOpen: 0.0, tears: false, droop: true },
+  crying: { eyeScale: 0.7, beakOpen: 0.3, tears: true, droop: true },
+};
+
 function drawBird(p, x, y, scale, t, state) {
-  state = Object.assign({ blink: 1, breath: 0, tilt: 0 }, state || {});
+  state = Object.assign({ blink: 1, breath: 0, tilt: 0, expression: null }, state || {});
+  const face = state.expression || BIRD_EXPRESSIONS.gentle;
   const ctx = p.drawingContext;
   const sY = 1 + 0.02 * state.breath;
   const sX = 1 / sY;
@@ -97,29 +107,45 @@ function drawBird(p, x, y, scale, t, state) {
     p.pop();
   }
 
-  // googly eyes
+  // googly eyes (scaled by expression; droop when sad)
   const gx = 4 * Math.sin((Math.PI * 2 * t) / 3.4);
   const gy = 2.5 * Math.cos((Math.PI * 2 * t) / 2.6);
-  const eyeOpen = Math.max(0.15, state.blink);
+  const eyeOpen = Math.max(0.15, state.blink) * face.eyeScale;
+  const droopY = face.droop ? 3 : 0;
   p.noStroke();
   p.fill(255, 255, 255);
-  p.ellipse(-12, -10, 26, 26 * eyeOpen);
-  p.ellipse(12, -10, 26, 26 * eyeOpen);
+  p.ellipse(-12, -10 + droopY, 26, 26 * eyeOpen);
+  p.ellipse(12, -10 + droopY, 26, 26 * eyeOpen);
   if (eyeOpen > 0.4) {
     p.fill(45, 35, 30);
-    p.circle(-12 + gx * eyeOpen, -10 + gy * eyeOpen, 12);
-    p.circle(12 + gx * eyeOpen, -10 + gy * eyeOpen, 12);
+    p.circle(-12 + gx * eyeOpen, -10 + droopY + gy * eyeOpen, 12);
+    p.circle(12 + gx * eyeOpen, -10 + droopY + gy * eyeOpen, 12);
     p.fill(255, 255, 255);
-    p.circle(-14 + gx * eyeOpen, -12 + gy * eyeOpen, 4);
-    p.circle(10 + gx * eyeOpen, -12 + gy * eyeOpen, 4);
+    p.circle(-14 + gx * eyeOpen, -12 + droopY + gy * eyeOpen, 4);
+    p.circle(10 + gx * eyeOpen, -12 + droopY + gy * eyeOpen, 4);
+  }
+  // tears: animated droplets when crying (Nandan Oct 17 — must read)
+  if (face.tears) {
+    for (const s of [-1, 1]) {
+      const fall = ((t * 0.7 + (s > 0 ? 0.5 : 0)) % 1);
+      const ty = 2 + fall * 26;
+      const ta = 1 - fall;
+      ctx.fillStyle = `rgba(150,200,240,${0.9 * ta})`;
+      ctx.beginPath();
+      ctx.ellipse(s * 12, ty, 4.5, 6.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = `rgba(255,255,255,${0.7 * ta})`;
+      ctx.beginPath(); ctx.arc(s * 12 - 1.5, ty - 2, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
   }
 
-  // tiny golden beak (his mouth)
+  // tiny golden beak (his mouth; opens when happy/crying)
   const bkg = ctx.createLinearGradient(0, -2, 0, 10);
   bkg.addColorStop(0, "rgb(245,195,120)"); bkg.addColorStop(1, "rgb(225,160,95)");
   ctx.fillStyle = bkg;
   ctx.beginPath();
-  ctx.moveTo(-8, 2); ctx.lineTo(8, 2); ctx.lineTo(0, 12); ctx.closePath(); ctx.fill();
+  const bo = face.beakOpen * 6;
+  ctx.moveTo(-8, 2); ctx.lineTo(8, 2); ctx.lineTo(0, 12 + bo); ctx.closePath(); ctx.fill();
 
   p.pop();
 }

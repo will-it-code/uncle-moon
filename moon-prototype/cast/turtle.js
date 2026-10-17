@@ -30,6 +30,7 @@ const TURTLE_EXPRESSIONS = {
   sleepy: { eyeA0: 0.15, eyeA1: 0.85, eyeW: 20, smileW: 22, smileH: 15, smileY: 26 },
   happy:  { eyeA0: 1.15, eyeA1: 1.85, eyeW: 22, smileW: 28, smileH: 19, smileY: 24 },
   gentle: { eyeA0: 0.18, eyeA1: 0.82, eyeW: 18, smileW: 18, smileH: 12, smileY: 27 },
+  sad:    { eyeA0: 0.10, eyeA1: 0.55, eyeW: 18, smileW: 18, smileH: 11, smileY: 32, frown: true },
 };
 
 function turtleExprParams(expr) {
@@ -81,7 +82,11 @@ function drawTurtle(p, x, y, scale, t, state) {
   p.arc(-10, 14 + headBob, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
   p.arc(10, 14 + headBob, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
   p.strokeWeight(4);
-  p.arc(0, face.smileY + headBob, face.smileW, face.smileH, Math.PI * 0.15, Math.PI * 0.85);
+  if (face.frown) {
+    p.arc(0, face.smileY + headBob + 8, face.smileW, face.smileH, Math.PI * 1.15, Math.PI * 1.85);
+  } else {
+    p.arc(0, face.smileY + headBob, face.smileW, face.smileH, Math.PI * 0.15, Math.PI * 0.85);
+  }
   p.noStroke();
 
   // emerald dome shell, lit from the upper-left. CLEAN: no spots, no patterns.

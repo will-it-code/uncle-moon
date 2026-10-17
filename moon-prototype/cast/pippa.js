@@ -36,6 +36,7 @@ const PIPPA_EXPRESSIONS = {
   sleepy: { eyeA0: 0.15, eyeA1: 0.85, eyeW: 18, smileW: 20, smileH: 14, smileY: 8 },
   happy:  { eyeA0: 1.15, eyeA1: 1.85, eyeW: 20, smileW: 26, smileH: 18, smileY: 6 },
   gentle: { eyeA0: 0.18, eyeA1: 0.82, eyeW: 16, smileW: 16, smileH: 11, smileY: 9 },
+  sad:    { eyeA0: 0.10, eyeA1: 0.55, eyeW: 16, smileW: 16, smileH: 10, smileY: 14, frown: true },
 };
 
 function pippaExprParams(expr) {
@@ -137,7 +138,11 @@ function drawPippa(p, x, y, scale, t, state) {
   p.noFill();
   p.stroke(PIPPA_INK[0], PIPPA_INK[1], PIPPA_INK[2]);
   p.strokeWeight(3.5); p.strokeCap(p.ROUND);
-  p.arc(1, face.smileY, face.smileW, face.smileH, Math.PI * 0.15, Math.PI * 0.85);
+  if (face.frown) {
+    p.arc(1, face.smileY + 8, face.smileW, face.smileH, Math.PI * 1.15, Math.PI * 1.85);
+  } else {
+    p.arc(1, face.smileY, face.smileW, face.smileH, Math.PI * 0.15, Math.PI * 0.85);
+  }
   p.noStroke();
 
   // little antennae with glowing tips

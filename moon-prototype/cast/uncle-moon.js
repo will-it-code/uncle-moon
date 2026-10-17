@@ -41,6 +41,7 @@ const MOON_EXPRESSIONS = {
   sleepy: { eyeA0: 0.15, eyeA1: 0.85, eyeW: 48, smileW: 88, smileH: 64, smileY: 28 },
   happy:  { eyeA0: 1.15, eyeA1: 1.85, eyeW: 54, smileW: 114, smileH: 86, smileY: 20 },
   gentle: { eyeA0: 0.18, eyeA1: 0.82, eyeW: 44, smileW: 70, smileH: 48, smileY: 30 },
+  sad:    { eyeA0: 0.10, eyeA1: 0.55, eyeW: 44, smileW: 70, smileH: 44, smileY: 38, frown: true },
 };
 
 function moonExprParams(expr) {
@@ -79,7 +80,11 @@ function moonDrawFace(p, ctx, face, blink) {
   p.arc(fx - 38, fy - 14, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
   p.arc(fx + 38, fy - 14, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
   p.strokeWeight(10);
-  p.arc(fx, fy + face.smileY, face.smileW, face.smileH, Math.PI * 0.12, Math.PI * 0.88);
+  if (face.frown) {
+    p.arc(fx, fy + face.smileY + 26, face.smileW, face.smileH, Math.PI * 1.12, Math.PI * 1.88);
+  } else {
+    p.arc(fx, fy + face.smileY, face.smileW, face.smileH, Math.PI * 0.12, Math.PI * 0.88);
+  }
   p.noStroke();
   // no blush (Nandan, Oct 16, 2026): the face stays completely clean.
 }
