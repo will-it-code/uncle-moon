@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="cast/common.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Meadow landscape (screenshot review): the living shader sky + three
+// hill layers in atmospheric perspective + drifting mist + swaying grass
+// + fireflies, all choreographed on one slow camera push. Pure f(t).
+const W = 1280, H = 720;
+let gl, uTimeLoc, tl;
+
+const FRAG = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453123); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1.0,0.0)), u.x),
+             mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int i=0;i<4;i++){ v += a*noise(p); p = p*2.03 + vec2(17.3,9.1); a *= 0.5; }
+  return v;
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 p = uv; p.x *= uRes.x / uRes.y;
+  float t = uTime * 0.02;
+  vec3 col = mix(vec3(0.016,0.024,0.059), vec3(0.082,0.125,0.290), pow(uv.y, 1.25));
+  vec2 q = vec2(fbm(p*1.6 + vec2(t, 0.0)), fbm(p*1.6 + vec2(5.2,1.3) - t*0.7));
+  float neb = fbm(p*1.6 + 2.6*q);
+  vec3 nebCol = mix(vec3(0.10,0.075,0.24), vec3(0.21,0.11,0.28), q.y);
+  col += nebCol * smoothstep(0.42, 0.88, neb) * 0.38;
+  float band = exp(-pow((uv.y - (0.64 - 0.28*uv.x))*3.2, 2.0));
+  col += vec3(0.09,0.08,0.15) * band * (0.35 + 0.65*neb);
+  vec2 sp = p * 42.0;
+  vec2 cell = floor(sp);
+  float h = hash(cell);
+  if(h > 0.93){
+    vec2 spos = vec2(hash(cell+7.13), hash(cell+3.71)) - 0.5;
+    float d = length(fract(sp) - 0.5 - spos*0.55);
+    float tw = 0.55 + 0.45*sin(uTime*(0.8+h*1.6) + h*43.0);
+    float star = smoothstep(0.09, 0.0, d) * tw;
+    star *= smoothstep(0.93, 0.995, h)*1.8 + 0.35;
+    col += vec3(1.0,0.97,0.90) * star;
+  }
+  float vig = smoothstep(1.30, 0.40, length(uv-0.5)*1.45);
+  col *= mix(0.72, 1.0, vig);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+const VERT = `attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+function initGL() {
+  const cv = document.getElementById('gl');
+  gl = cv.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  function sh(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(pr); gl.useProgram(pr);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(gl.getUniformLocation(pr, 'uRes'), W, H);
+  uTimeLoc = gl.getUniformLocation(pr, 'uTime');
+  gl.viewport(0, 0, W, H);
+}
+
+// deterministic meadow dressing
+const blades = [];
+{
+  const rnd = castMulberry32(99);
+  for (let i = 0; i < 150; i++) {
+    blades.push({ x: -60 + rnd() * 1400, h: 45 + rnd() * 70,
+                  ph: rnd() * 6.28, w: 2.5 + rnd() * 2,
+                  tone: rnd() });
+  }
+}
+const flies = [];
+{
+  const rnd = castMulberry32(5);
+  for (let i = 0; i < 9; i++) {
+    flies.push({ x: 100 + rnd() * 1080, y: 480 + rnd() * 160,
+                 ph: rnd() * 6.28, r: 22 + rnd() * 14 });
+  }
+}
+
+function hillY(x, base, a1, f1, p1, a2, f2, p2) {
+  return base + a1 * Math.sin(x * f1 + p1) + a2 * Math.sin(x * f2 + p2);
+}
+
+function drawHills(ctx, t) {
+  const layers = [
+    { base: 470, a1: 34, f1: 0.004, p1: 1.2, a2: 14, f2: 0.011, p2: 4.0, c: [44, 54, 104] },
+    { base: 555, a1: 40, f1: 0.003, p1: 5.1, a2: 18, f2: 0.009, p2: 2.2, c: [30, 38, 82] },
+    { base: 645, a1: 44, f1: 0.0025, p1: 0.4, a2: 20, f2: 0.007, p2: 3.3, c: [18, 24, 58] },
+  ];
+  for (const L of layers) {
+    const g = ctx.createLinearGradient(0, L.base - 80, 0, H);
+    g.addColorStop(0, `rgb(${L.c[0]},${L.c[1]},${L.c[2]})`);
+    g.addColorStop(1, `rgb(${Math.max(8, L.c[0] - 14)},${Math.max(10, L.c[1] - 14)},${Math.max(24, L.c[2] - 22)})`);
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.moveTo(-60, H);
+    for (let x = -60; x <= W + 60; x += 8) {
+      ctx.lineTo(x, hillY(x, L.base, L.a1, L.f1, L.p1, L.a2, L.f2, L.p2));
+    }
+    ctx.lineTo(W + 60, H);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initGL();
+  tl = gsap.timeline({ paused: true });
+  window.__seek = (t) => {
+    tl.seek(t);
+    gl.uniform1f(uTimeLoc, t);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  const ctx = drawingContext;
+
+  // one slow camera push: the whole meadow breathes inward
+  const cam = 1 + 0.035 * (t / 6);
+  ctx.save();
+  ctx.translate(W / 2, H / 2); ctx.scale(cam, cam); ctx.translate(-W / 2, -H / 2);
+
+  drawHills(ctx, t);
+
+  // drifting mist bands
+  for (const [my, mh, sp, op] of [[500, 70, 9, 0.10], [590, 90, 6, 0.08]]) {
+    const ox = ((t * sp) % (W + 500)) - 250;
+    for (const xx of [ox - (W + 500), ox]) {
+      const mg = ctx.createLinearGradient(0, my - mh / 2, 0, my + mh / 2);
+      mg.addColorStop(0, "rgba(200,210,240,0)");
+      mg.addColorStop(0.5, `rgba(200,210,240,${op})`);
+      mg.addColorStop(1, "rgba(200,210,240,0)");
+      ctx.fillStyle = mg;
+      ctx.fillRect(xx, my - mh / 2, W + 500, mh);
+    }
+  }
+
+  // swaying grass
+  ctx.lineCap = "round";
+  for (const b of blades) {
+    const sway = Math.sin(t * 1.1 + b.ph + b.x * 0.004) * 10;
+    const gcol = 26 + b.tone * 22;
+    ctx.strokeStyle = `rgb(${gcol * 0.7},${gcol + 14},${gcol + 34})`;
+    ctx.lineWidth = b.w;
+    ctx.beginPath();
+    ctx.moveTo(b.x, 730);
+    ctx.quadraticCurveTo(b.x + sway * 0.4, 730 - b.h * 0.6, b.x + sway, 730 - b.h);
+    ctx.stroke();
+  }
+
+  // fireflies drifting over the meadow
+  for (const f of flies) {
+    const fx = f.x + 26 * Math.sin(t * 0.45 + f.ph);
+    const fy = f.y + 16 * Math.sin(t * 0.7 + f.ph * 2.0);
+    const tw = 0.55 + 0.45 * Math.sin(t * 1.8 + f.ph * 3.0);
+    castRadialGlow(this, fx, fy, f.r * tw, [255, 214, 130], 0.5 * tw);
+    ctx.fillStyle = `rgba(255,226,160,${0.9 * tw})`;
+    ctx.beginPath(); ctx.arc(fx, fy, 3.5, 0, Math.PI * 2); ctx.fill();
+  }
+
+  ctx.restore();
+}
+</script>
+</body></html>
