@@ -3,6 +3,7 @@
 <script src="vendor/p5.min.js"></script>
 <script src="vendor/gsap.min.js"></script>
 <script src="cast/common.js"></script>
+<script src="cast/scenery.js"></script>
 <style>
   html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
   #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
@@ -84,16 +85,7 @@ function initGL() {
   gl.viewport(0, 0, W, H);
 }
 
-// deterministic meadow dressing
-const blades = [];
-{
-  const rnd = castMulberry32(99);
-  for (let i = 0; i < 150; i++) {
-    blades.push({ x: -60 + rnd() * 1400, h: 45 + rnd() * 70,
-                  ph: rnd() * 6.28, w: 2.5 + rnd() * 2,
-                  tone: rnd() });
-  }
-}
+// fireflies (positions only; drawn later)
 const flies = [];
 {
   const rnd = castMulberry32(5);
@@ -156,6 +148,9 @@ function draw(t) {
 
   drawHills(ctx, t);
 
+  // distant castle on the far hill, windows glowing
+  drawCastle(this, 320, 508, 0.85, t, {});
+
   // drifting mist bands
   for (const [my, mh, sp, op] of [[500, 70, 9, 0.10], [590, 90, 6, 0.08]]) {
     const ox = ((t * sp) % (W + 500)) - 250;
@@ -169,18 +164,13 @@ function draw(t) {
     }
   }
 
-  // swaying grass
-  ctx.lineCap = "round";
-  for (const b of blades) {
-    const sway = Math.sin(t * 1.1 + b.ph + b.x * 0.004) * 10;
-    const gcol = 26 + b.tone * 22;
-    ctx.strokeStyle = `rgb(${gcol * 0.7},${gcol + 14},${gcol + 34})`;
-    ctx.lineWidth = b.w;
-    ctx.beginPath();
-    ctx.moveTo(b.x, 730);
-    ctx.quadraticCurveTo(b.x + sway * 0.4, 730 - b.h * 0.6, b.x + sway, 730 - b.h);
-    ctx.stroke();
-  }
+  // storybook tree, right foreground
+  drawTree(this, 1090, 632, 1.15, t, {});
+
+  // grass: back layer, front layer with moonlit tips, night flowers
+  drawGrassField(this, t, 101, 738, 90, 30, 62, 0);
+  drawGrassField(this, t, 102, 748, 70, 55, 105, 1);
+  drawNightFlowers(this, t, 103, 14, 722);
 
   // fireflies drifting over the meadow
   for (const f of flies) {
