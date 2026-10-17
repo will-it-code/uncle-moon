@@ -170,6 +170,7 @@ function drawUncleMoon(p, x, y, scale, t, state) {
   g.addColorStop(1.00, "rgb(214,196,170)");
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.fill();
+  grainOver(ctx, cx, cy, R, R, 0.05); // hand-painted tooth (whisper)
 
   // render-stack passes, clipped to the disc
   ctx.save();

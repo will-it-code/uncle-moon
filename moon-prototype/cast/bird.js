@@ -68,6 +68,7 @@ function drawBird(p, x, y, scale, t, state) {
   bg.addColorStop(1, "rgb(210,130,95)");
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+  grainOver(ctx, 0, 0, 30, 30, 0.08); // hand-painted tooth
 
   // sunny belly
   const belly = ctx.createRadialGradient(0, 8, 2, 0, 12, 22);

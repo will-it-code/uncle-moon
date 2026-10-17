@@ -91,6 +91,7 @@ function drawTurtle(p, x, y, scale, t, state) {
   shg.addColorStop(1, "rgb(30,150,95)");
   ctx.fillStyle = shg;
   ctx.beginPath(); ctx.arc(0, 5, 55, Math.PI, 0); ctx.closePath(); ctx.fill();
+  grainOver(ctx, 0, 5, 55, 55, 0.08); // hand-painted tooth (shell + head)
 
   // golden rim along the shell's base
   p.noFill(); p.stroke(TURTLE_RIM[0], TURTLE_RIM[1], TURTLE_RIM[2]); p.strokeWeight(7);
