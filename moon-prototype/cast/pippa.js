@@ -17,8 +17,10 @@
  *             curved line eyes + smile, warm cream ink on her dark body.
  *
  * Design (Oct 16, 2026 — Nandan's call): like the moon — NO spots, NO cheek
- * patches, clean smooth body, expressive line face. Her signatures stay:
- * glowing lantern abdomen, translucent wings, antennae with glowing tips.
+ * patches, clean smooth body. Her face: signature googly eyes (white with
+ * glancing pupils) + a clean cream smile. Her light is an aura AROUND her,
+ * never a spot on her. Signatures that stay: the aura, translucent wings,
+ * antennae with glowing tips.
  * Requires cast/common.js (castRadialGlow).
  * ============================================================================
  */
@@ -53,7 +55,10 @@ function drawPippa(p, x, y, scale, t, state) {
   p.scale(scale, scale);
   p.rotate(state.tilt);
 
-  // her warm halo lights the world around her
+  // her light lives AROUND her, never as a spot on her: a soft aura hugging
+  // her body (drawn first, so her body covers its center and only the glow
+  // around her shows) + the wide halo that lights the world.
+  castRadialGlow(p, 0, 10, 62 * pulse + 28, PIPPA_GLOW, 0.50 * pulse);
   castRadialGlow(p, 0, 0, 150 * pulse + 40, PIPPA_GLOW, 0.30 * pulse);
   castRadialGlow(p, 0, 0, 70, PIPPA_GLOW, 0.45 * pulse);
 
@@ -83,25 +88,29 @@ function drawPippa(p, x, y, scale, t, state) {
   p.noFill(); p.stroke(255, 226, 160, 70); p.strokeWeight(2.5);
   p.arc(0, 0, 49, 49, Math.PI * 1.05, Math.PI * 1.45); p.noStroke();
 
-  // glowing abdomen: her lantern (signature, stays)
-  const lg = ctx.createRadialGradient(4, 12, 2, 4, 12, 16 * pulse + 8);
-  lg.addColorStop(0, "rgba(255,240,190,0.95)");
-  lg.addColorStop(0.6, "rgba(255,214,130,0.85)");
-  lg.addColorStop(1, "rgba(255,190,110,0)");
-  ctx.fillStyle = lg;
-  ctx.beginPath();
-  ctx.ellipse(4, 12, 22 * pulse + 10, 16 * pulse + 8, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // (no lantern spot: her glow is the aura around her, drawn above)
 
-  // face: the moon's language — curved line eyes + smile, cream ink.
-  // clean: no eye-whites, no pupils, no cheek patches.
-  const eyeH = Math.max(2, face.eyeW * state.blink);
+  // face: her signature googly eyes + the moon's clean smile in cream ink.
+  // clean: no cheek patches, ever.
+  const gx = 5 * Math.sin((Math.PI * 2 * t) / 3.1);
+  const gy = 3 * Math.cos((Math.PI * 2 * t) / 2.3);
+  const eyeOpen = Math.max(0.15, state.blink);
+  p.noStroke();
+  p.fill(255, 255, 255);
+  p.ellipse(-11, -8, 26, 26 * eyeOpen);
+  p.ellipse(13, -8, 26, 26 * eyeOpen);
+  if (eyeOpen > 0.4) {
+    p.fill(40, 34, 52);
+    p.circle(-11 + gx * eyeOpen, -8 + gy * eyeOpen, 12);
+    p.circle(13 + gx * eyeOpen, -8 + gy * eyeOpen, 12);
+    p.fill(255, 255, 255);
+    p.circle(-13 + gx * eyeOpen, -10 + gy * eyeOpen, 4);
+    p.circle(11 + gx * eyeOpen, -10 + gy * eyeOpen, 4);
+  }
+  // smile morphs with the expression (sleepy/happy/gentle)
   p.noFill();
   p.stroke(PIPPA_INK[0], PIPPA_INK[1], PIPPA_INK[2]);
   p.strokeWeight(3.5); p.strokeCap(p.ROUND);
-  p.arc(-11, -8, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
-  p.arc(13, -8, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
-  p.strokeWeight(3.5);
   p.arc(1, face.smileY, face.smileW, face.smileH, Math.PI * 0.15, Math.PI * 0.85);
   p.noStroke();
 
