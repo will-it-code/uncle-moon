@@ -1,32 +1,51 @@
 /* ============================================================================
- * cast/pippa.js — Pippa the firefly as a reusable cast member.
+ * cast/pippa.js — Pippa the firefly, in Uncle Moon's design language.
  *
  *   drawPippa(p, x, y, scale, t, state)
  *     p     — p5 instance (pass `window` in global-mode pages)
  *     x, y  — center of her body, in canvas px (the SCENE moves her;
  *             this function does not pick its own flight path)
- *     scale — 1.0 = design size (body r=26, identical to pippa-prototype)
- *     t     — scene time in seconds (wing flutter, glow pulse, eye glance)
- *     state — optional: { glow, tilt }
- *             glow: lantern brightness multiplier (0.9 calm … 1.2 joyful;
- *                   use ~0.15 for "glow all gone")
+ *     scale — 1.0 = design size (body r=26)
+ *     t     — scene time in seconds (wing flutter, glow pulse)
+ *     state — optional: { glow, tilt, blink, expression }
+ *             glow: lantern brightness (0.9 calm … 1.2 joyful; ~0.15 = out)
  *             tilt: radians of lean (default 0)
+ *             blink: 1 open … 0.15 shut (default 1)
+ *             expression: "sleepy" (default) | "happy" | "gentle", or a
+ *             param object {eyeA0, eyeA1, eyeW, smileW, smileH, smileY}
+ *             (angles in units of PI). Same face language as the moon:
+ *             curved line eyes + smile, warm cream ink on her dark body.
  *
- * Drawing code transcribed 1:1 from pippa-prototype.html — at scale=1 the
- * pixels are identical. Requires cast/common.js (castRadialGlow).
+ * Design (Oct 16, 2026 — Nandan's call): like the moon — NO spots, NO cheek
+ * patches, clean smooth body, expressive line face. Her signatures stay:
+ * glowing lantern abdomen, translucent wings, antennae with glowing tips.
+ * Requires cast/common.js (castRadialGlow).
  * ============================================================================
  */
 "use strict";
 
 const PIPPA_GLOW = [255, 214, 130];
-const PIPPA_BODY = [52, 46, 64];
+const PIPPA_INK  = [255, 240, 210];   // warm cream lines on her dark body
+const PIPPA_BODY = [58, 50, 72];
 const PIPPA_GLOW_PERIOD = 2.2;
 const PIPPA_WING_HZ = 6.0;
 
-function drawPippa(p, x, y, scale, t, state) {
-  state = Object.assign({ glow: 1.0, tilt: 0 }, state || {});
-  const ctx = p.drawingContext;
+const PIPPA_EXPRESSIONS = {
+  sleepy: { eyeA0: 0.15, eyeA1: 0.85, eyeW: 18, smileW: 20, smileH: 14, smileY: 8 },
+  happy:  { eyeA0: 1.15, eyeA1: 1.85, eyeW: 20, smileW: 26, smileH: 18, smileY: 6 },
+  gentle: { eyeA0: 0.18, eyeA1: 0.82, eyeW: 16, smileW: 16, smileH: 11, smileY: 9 },
+};
 
+function pippaExprParams(expr) {
+  if (typeof expr === "object" && expr !== null) return expr;
+  return PIPPA_EXPRESSIONS[expr] || PIPPA_EXPRESSIONS.sleepy;
+}
+
+function drawPippa(p, x, y, scale, t, state) {
+  state = Object.assign(
+    { glow: 1.0, tilt: 0, blink: 1, expression: "sleepy" }, state || {});
+  const ctx = p.drawingContext;
+  const face = pippaExprParams(state.expression);
   const pulse = (0.72 + 0.28 * Math.sin((Math.PI * 2 * t) / PIPPA_GLOW_PERIOD)) * state.glow;
 
   p.push();
@@ -52,43 +71,43 @@ function drawPippa(p, x, y, scale, t, state) {
     p.pop();
   }
 
-  // tiny dark round body
-  const bg = ctx.createRadialGradient(-8, -10, 4, 0, 0, 30);
-  bg.addColorStop(0, "rgb(74,66,92)");
-  bg.addColorStop(1, `rgb(${PIPPA_BODY[0]},${PIPPA_BODY[1]},${PIPPA_BODY[2]})`);
+  // smooth dark body, softly lit from the upper-left (one light direction)
+  const bg = ctx.createRadialGradient(-9, -11, 4, 0, 0, 30);
+  bg.addColorStop(0, "rgb(96,86,120)");
+  bg.addColorStop(0.6, `rgb(${PIPPA_BODY[0]},${PIPPA_BODY[1]},${PIPPA_BODY[2]})`);
+  bg.addColorStop(1, "rgb(38,32,50)");
   ctx.fillStyle = bg;
   ctx.beginPath(); ctx.arc(0, 0, 26, 0, Math.PI * 2); ctx.fill();
 
-  // glowing abdomen (her lantern)
-  castRadialGlow(p, 4, 12, 20 * pulse + 6, PIPPA_GLOW, 0.85);
-  p.fill(255, 226, 150, 235);
-  p.ellipse(4, 12, 22 * pulse + 8, 16 * pulse + 6);
+  // whisper of warm rim light, upper-left (echoes the moon's rim)
+  p.noFill(); p.stroke(255, 226, 160, 70); p.strokeWeight(2.5);
+  p.arc(0, 0, 49, 49, Math.PI * 1.05, Math.PI * 1.45); p.noStroke();
 
-  // big cute eyes, glancing around curiously
-  const gx = 5 * Math.sin((Math.PI * 2 * t) / 3.1);
-  const gy = 3 * Math.cos((Math.PI * 2 * t) / 2.3);
-  p.noStroke();
-  p.fill(255, 255, 255);
-  p.circle(-11, -8, 26);
-  p.circle(13, -8, 26);
-  p.fill(40, 34, 52);
-  p.circle(-11 + gx, -8 + gy, 12);
-  p.circle(13 + gx, -8 + gy, 12);
-  p.fill(255, 255, 255);
-  p.circle(-13 + gx, -10 + gy, 4);
-  p.circle(11 + gx, -10 + gy, 4);
+  // glowing abdomen: her lantern (signature, stays)
+  const lg = ctx.createRadialGradient(4, 12, 2, 4, 12, 16 * pulse + 8);
+  lg.addColorStop(0, "rgba(255,240,190,0.95)");
+  lg.addColorStop(0.6, "rgba(255,214,130,0.85)");
+  lg.addColorStop(1, "rgba(255,190,110,0)");
+  ctx.fillStyle = lg;
+  ctx.beginPath();
+  ctx.ellipse(4, 12, 22 * pulse + 10, 16 * pulse + 8, 0, 0, Math.PI * 2);
+  ctx.fill();
 
-  // tiny sweet smile + rosy cheeks
+  // face: the moon's language — curved line eyes + smile, cream ink.
+  // clean: no eye-whites, no pupils, no cheek patches.
+  const eyeH = Math.max(2, face.eyeW * state.blink);
   p.noFill();
-  p.stroke(70, 58, 78); p.strokeWeight(3); p.strokeCap(p.ROUND);
-  p.arc(1, 6, 16, 12, Math.PI * 0.2, Math.PI * 0.8);
+  p.stroke(PIPPA_INK[0], PIPPA_INK[1], PIPPA_INK[2]);
+  p.strokeWeight(3.5); p.strokeCap(p.ROUND);
+  p.arc(-11, -8, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
+  p.arc(13, -8, face.eyeW, eyeH, face.eyeA0 * Math.PI, face.eyeA1 * Math.PI);
+  p.strokeWeight(3.5);
+  p.arc(1, face.smileY, face.smileW, face.smileH, Math.PI * 0.15, Math.PI * 0.85);
   p.noStroke();
-  castRadialGlow(p, -20, 4, 7, [255, 150, 150], 0.5);
-  castRadialGlow(p, 22, 4, 7, [255, 150, 150], 0.5);
 
   // little antennae with glowing tips
   p.noFill();
-  p.stroke(70, 58, 78); p.strokeWeight(2.5);
+  p.stroke(90, 80, 110); p.strokeWeight(2.5);
   p.bezier(-8, -24, -14, -34, -20, -38, -26, -40);
   p.bezier(8, -24, 14, -34, 20, -38, 26, -40);
   p.noStroke();

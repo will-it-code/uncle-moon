@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<script src="vendor/p5.min.js"></script>
+<script src="vendor/gsap.min.js"></script>
+<script src="vendor/MotionPathPlugin.min.js"></script>
+<script src="cast/common.js"></script>
+<script src="cast/uncle-moon.js"></script>
+<script src="cast/pippa.js"></script>
+<style>
+  html,body{margin:0;padding:0;background:#04060f;overflow:hidden}
+  #gl{position:fixed;left:0;top:0;width:1280px;height:720px;z-index:0}
+  canvas.p5Canvas{position:fixed;left:0;top:0;z-index:1}
+</style>
+</head><body>
+<canvas id="gl" width="1280" height="720"></canvas>
+<script>
+// Pippa redesign sample (6s): the new clean Pippa flies a gentle arc to
+// Uncle Moon, who watches. Same face language, same light, one universe.
+gsap.registerPlugin(MotionPathPlugin);
+const W = 1280, H = 720, DUR = 6;
+let gl, uTimeLoc, tl;
+const moonState = { blink: 1, breath: 0, expression: "gentle" };
+const pippaPos = { x: 180, y: 560 };
+const pippaState = { blink: 1, tilt: 0.12, glow: 1 };
+const pippaFace = Object.assign({}, PIPPA_EXPRESSIONS.sleepy);
+pippaState.expression = pippaFace;
+
+const FRAG = `
+precision highp float;
+uniform vec2 uRes;
+uniform float uTime;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453123); }
+float noise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i), hash(i+vec2(1.0,0.0)), u.x),
+             mix(hash(i+vec2(0.0,1.0)), hash(i+vec2(1.0,1.0)), u.x), u.y);
+}
+float fbm(vec2 p){
+  float v = 0.0, a = 0.5;
+  for(int i=0;i<4;i++){ v += a*noise(p); p = p*2.03 + vec2(17.3,9.1); a *= 0.5; }
+  return v;
+}
+void main(){
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 p = uv; p.x *= uRes.x / uRes.y;
+  float t = uTime * 0.02;
+  vec3 col = mix(vec3(0.016,0.024,0.059), vec3(0.082,0.125,0.290), pow(uv.y, 1.25));
+  vec2 q = vec2(fbm(p*1.6 + vec2(t, 0.0)), fbm(p*1.6 + vec2(5.2,1.3) - t*0.7));
+  float neb = fbm(p*1.6 + 2.6*q);
+  vec3 nebCol = mix(vec3(0.10,0.075,0.24), vec3(0.21,0.11,0.28), q.y);
+  col += nebCol * smoothstep(0.42, 0.88, neb) * 0.38;
+  float band = exp(-pow((uv.y - (0.64 - 0.28*uv.x))*3.2, 2.0));
+  col += vec3(0.09,0.08,0.15) * band * (0.35 + 0.65*neb);
+  vec2 sp = p * 42.0;
+  vec2 cell = floor(sp);
+  float h = hash(cell);
+  if(h > 0.93){
+    vec2 spos = vec2(hash(cell+7.13), hash(cell+3.71)) - 0.5;
+    float d = length(fract(sp) - 0.5 - spos*0.55);
+    float tw = 0.55 + 0.45*sin(uTime*(0.8+h*1.6) + h*43.0);
+    float star = smoothstep(0.09, 0.0, d) * tw;
+    star *= smoothstep(0.93, 0.995, h)*1.8 + 0.35;
+    col += vec3(1.0,0.97,0.90) * star;
+  }
+  float vig = smoothstep(1.30, 0.40, length(uv-0.5)*1.45);
+  col *= mix(0.72, 1.0, vig);
+  gl_FragColor = vec4(col, 1.0);
+}`;
+const VERT = `attribute vec2 aPos; void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+function initGL() {
+  const cv = document.getElementById('gl');
+  gl = cv.getContext('webgl', { antialias: false, preserveDrawingBuffer: true });
+  function sh(type, src) {
+    const s = gl.createShader(type); gl.shaderSource(s, src); gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    return s;
+  }
+  const pr = gl.createProgram();
+  gl.attachShader(pr, sh(gl.VERTEX_SHADER, VERT));
+  gl.attachShader(pr, sh(gl.FRAGMENT_SHADER, FRAG));
+  gl.linkProgram(pr); gl.useProgram(pr);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(pr, 'aPos');
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.uniform2f(gl.getUniformLocation(pr, 'uRes'), W, H);
+  uTimeLoc = gl.getUniformLocation(pr, 'uTime');
+  gl.viewport(0, 0, W, H);
+}
+
+function setup() {
+  createCanvas(W, H); pixelDensity(1);
+  initGL();
+  tl = gsap.timeline({ paused: true });
+  tl.to(moonState, { breath: 1, duration: DUR, ease: "sine.inOut" }, 0);
+  tl.to(pippaPos, {
+    motionPath: { path: [{ x: 180, y: 560 }, { x: 400, y: 400 }, { x: 640, y: 450 }],
+                  curviness: 1.4 },
+    duration: 3.2, ease: "sine.inOut"
+  }, 0.4);
+  tl.to(pippaState, { tilt: 0, duration: 1.0, ease: "sine.inOut" }, 3.0);
+  tl.to(pippaState, { blink: 0.15, duration: 0.16, ease: "sine.in" }, 3.4);
+  tl.to(pippaFace, Object.assign({ duration: 0.5, ease: "sine.inOut" }, PIPPA_EXPRESSIONS.happy), 3.45);
+  tl.to(pippaState, { blink: 1, duration: 0.24, ease: "sine.out" }, 3.56);
+  tl.to(moonState, { blink: 0.15, duration: 0.16, ease: "sine.in" }, 4.6);
+  tl.to(moonState, { blink: 1, duration: 0.24, ease: "sine.out" }, 4.76);
+  window.__seek = (t) => {
+    tl.seek(t);
+    gl.uniform1f(uTimeLoc, t);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    draw(t);
+    window.__frameReady = true;
+  };
+  window.__frameReady = true;
+  noLoop();
+}
+
+function draw(t) {
+  if (t === undefined || !isFinite(t)) return;
+  resetMatrix();
+  clear();
+  drawUncleMoon(this, 950, 250, 0.85, t, moonState);
+  const bob = 6 * Math.sin(t * 2.0);
+  drawPippa(this, pippaPos.x, pippaPos.y + bob, 2.2, t, pippaState);
+}
+</script>
+</body></html>
